@@ -224,13 +224,13 @@ impl PopupWindow {
 
                 gdk::Key::Return | gdk::Key::KP_Enter => {
                     if shift {
-                        gtk::prelude::WidgetExt::activate_action(
+                        let _ = gtk::prelude::WidgetExt::activate_action(
                             &window,
                             "win.restore-plain",
                             None,
                         );
                     } else {
-                        gtk::prelude::WidgetExt::activate_action(
+                        let _ = gtk::prelude::WidgetExt::activate_action(
                             &window,
                             "win.restore-original",
                             None,
@@ -240,7 +240,7 @@ impl PopupWindow {
                 }
 
                 gdk::Key::BackSpace if ctrl => {
-                    gtk::prelude::WidgetExt::activate_action(
+                    let _ = gtk::prelude::WidgetExt::activate_action(
                         &window,
                         "win.delete-entry",
                         None,
@@ -249,7 +249,7 @@ impl PopupWindow {
                 }
 
                 gdk::Key::p | gdk::Key::P if ctrl => {
-                    gtk::prelude::WidgetExt::activate_action(
+                    let _ = gtk::prelude::WidgetExt::activate_action(
                         &window,
                         "win.toggle-pin",
                         None,
@@ -258,7 +258,7 @@ impl PopupWindow {
                 }
 
                 gdk::Key::Delete if ctrl && shift => {
-                    gtk::prelude::WidgetExt::activate_action(
+                    let _ = gtk::prelude::WidgetExt::activate_action(
                         &window,
                         "win.clear-all",
                         None,
@@ -267,7 +267,7 @@ impl PopupWindow {
                 }
 
                 gdk::Key::comma if ctrl => {
-                    gtk::prelude::WidgetExt::activate_action(
+                    let _ = gtk::prelude::WidgetExt::activate_action(
                         &window,
                         "win.open-settings",
                         None,
@@ -276,7 +276,7 @@ impl PopupWindow {
                 }
 
                 gdk::Key::_1 if ctrl => {
-                    gtk::prelude::WidgetExt::activate_action(
+                    let _ = gtk::prelude::WidgetExt::activate_action(
                         &window,
                         "win.filter",
                         Some(&0i32.to_variant()),
@@ -284,7 +284,7 @@ impl PopupWindow {
                     glib::Propagation::Stop
                 }
                 gdk::Key::_2 if ctrl => {
-                    gtk::prelude::WidgetExt::activate_action(
+                    let _ = gtk::prelude::WidgetExt::activate_action(
                         &window,
                         "win.filter",
                         Some(&1i32.to_variant()),
@@ -292,7 +292,7 @@ impl PopupWindow {
                     glib::Propagation::Stop
                 }
                 gdk::Key::_3 if ctrl => {
-                    gtk::prelude::WidgetExt::activate_action(
+                    let _ = gtk::prelude::WidgetExt::activate_action(
                         &window,
                         "win.filter",
                         Some(&2i32.to_variant()),
@@ -300,7 +300,7 @@ impl PopupWindow {
                     glib::Propagation::Stop
                 }
                 gdk::Key::_4 if ctrl => {
-                    gtk::prelude::WidgetExt::activate_action(
+                    let _ = gtk::prelude::WidgetExt::activate_action(
                         &window,
                         "win.filter",
                         Some(&3i32.to_variant()),
@@ -308,7 +308,7 @@ impl PopupWindow {
                     glib::Propagation::Stop
                 }
                 gdk::Key::_5 if ctrl => {
-                    gtk::prelude::WidgetExt::activate_action(
+                    let _ = gtk::prelude::WidgetExt::activate_action(
                         &window,
                         "win.filter",
                         Some(&4i32.to_variant()),

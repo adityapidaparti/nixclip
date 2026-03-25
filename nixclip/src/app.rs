@@ -19,7 +19,7 @@ struct QueryState {
     class: Option<ContentClass>,
 }
 
-struct UiHandle {
+pub(crate) struct UiHandle {
     ipc: Rc<UiIpcClient>,
     popup: Rc<PopupWindow>,
     query_state: Rc<RefCell<QueryState>>,
