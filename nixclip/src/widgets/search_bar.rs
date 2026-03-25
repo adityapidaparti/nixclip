@@ -22,7 +22,7 @@ impl SearchBar {
         Self { entry }
     }
 
-    /// Connect a callback that fires when search text changes, with a 300ms debounce.
+    /// Connect a callback that fires when search text changes, with a 100ms debounce.
     pub fn connect_search_changed(&self, callback: impl Fn(String) + 'static) {
         let callback = Rc::new(callback);
         let timeout_id: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
@@ -38,7 +38,7 @@ impl SearchBar {
 
             let timeout_id_clone = timeout_id.clone();
             let id = glib::timeout_add_local_once(
-                std::time::Duration::from_millis(300),
+                std::time::Duration::from_millis(100),
                 move || {
                     cb(text);
                     // Clear the stored id since the timer has fired.

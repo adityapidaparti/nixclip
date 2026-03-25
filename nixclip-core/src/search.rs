@@ -200,6 +200,7 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<EntrySummary> {
         source_app: row.get(7)?,
         // thumbnail is not stored in the entries table; set to None.
         thumbnail: None,
+        match_ranges: vec![],
     })
 }
 
@@ -372,8 +373,8 @@ fn score_candidates(
     // when using Pattern::score.  We discover the max over this candidate set.
     let mut buf = Vec::new();
 
-    // First pass: obtain raw scores and find the maximum.
-    let mut raw_scores: Vec<Option<u32>> = Vec::with_capacity(candidates.len());
+    // First pass: obtain raw scores + match indices, find the maximum score.
+    let mut raw_scores: Vec<Option<(u32, Vec<u32>)>> = Vec::with_capacity(candidates.len());
     let mut max_score: u32 = 1; // avoid division by zero
 
     for entry in &candidates {
@@ -382,24 +383,67 @@ fn score_candidates(
             .as_deref()
             .unwrap_or("");
         let haystack = Utf32Str::new(haystack_str, &mut buf);
-        let score = pattern.score(haystack, &mut matcher);
+        let mut indices = Vec::new();
+        let score = pattern.indices(haystack, &mut matcher, &mut indices);
         if let Some(s) = score {
             if s > max_score {
                 max_score = s;
             }
+            raw_scores.push(Some((s, indices)));
+        } else {
+            raw_scores.push(None);
         }
-        raw_scores.push(score);
     }
 
     // Second pass: build composite scores, dropping non-matching entries.
     candidates
         .into_iter()
-        .zip(raw_scores)
-        .filter_map(|(entry, raw_score)| {
-            let raw = raw_score?; // drop entries with no nucleo match
+        .zip(raw_scores.into_iter())
+        .filter_map(|(mut entry, raw_data)| {
+            let (raw, char_indices) = raw_data?; // drop entries with no nucleo match
             let normalized = raw as f64 / max_score as f64;
             let composite =
                 composite_score(normalized, entry.last_seen_at, entry.pinned, now_ms);
+
+            // Convert character indices to (start_byte, length_bytes) ranges,
+            // collapsing consecutive positions into contiguous ranges.
+            let preview = entry.preview_text.as_deref().unwrap_or("");
+            let char_to_byte: Vec<usize> = preview.char_indices().map(|(i, _)| i).collect();
+            let char_lens: Vec<usize> = preview.chars().map(|c| c.len_utf8()).collect();
+
+            let mut ranges: Vec<(u32, u32)> = Vec::new();
+            let mut sorted_indices = char_indices;
+            sorted_indices.sort_unstable();
+            sorted_indices.dedup();
+
+            let mut i = 0;
+            while i < sorted_indices.len() {
+                let start_char = sorted_indices[i] as usize;
+                if start_char >= char_to_byte.len() {
+                    i += 1;
+                    continue;
+                }
+                let start_byte = char_to_byte[start_char];
+                let mut end_char = start_char;
+
+                // Extend range while characters are consecutive.
+                while i + 1 < sorted_indices.len()
+                    && sorted_indices[i + 1] as usize == end_char + 1
+                {
+                    end_char = sorted_indices[i + 1] as usize;
+                    i += 1;
+                }
+
+                let end_byte = if end_char < char_lens.len() {
+                    char_to_byte[end_char] + char_lens[end_char]
+                } else {
+                    preview.len()
+                };
+                ranges.push((start_byte as u32, (end_byte - start_byte) as u32));
+                i += 1;
+            }
+
+            entry.match_ranges = ranges;
             Some((entry, composite))
         })
         .collect()
