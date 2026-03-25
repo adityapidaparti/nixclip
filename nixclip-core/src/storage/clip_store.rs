@@ -6,7 +6,7 @@ use rusqlite::params;
 use crate::config::GeneralConfig;
 use crate::error::Result;
 use crate::{
-    ContentClass, EntrySummary, EntryId, NewEntry, PruneStats, Query, QueryResult,
+    ContentClass, EntryMetadata, EntrySummary, EntryId, NewEntry, PruneStats, Query, QueryResult,
     Representation, StoreStats,
 };
 
@@ -78,34 +78,40 @@ impl ClipStore {
     pub fn insert(&self, entry: NewEntry) -> Result<Option<EntryId>> {
         let now = chrono::Utc::now().timestamp_millis();
 
-        // -- Dedup check against the most recent entry --
-        let last_hash: Option<Vec<u8>> = self
+        // -- Global dedup check against all entries by canonical_hash --
+        let existing: Option<i64> = self
             .conn
             .query_row(
-                "SELECT canonical_hash FROM entries ORDER BY last_seen_at DESC LIMIT 1",
-                [],
+                "SELECT id FROM entries WHERE canonical_hash = ?1 LIMIT 1",
+                params![entry.canonical_hash.as_slice()],
                 |row| row.get(0),
             )
             .ok();
 
-        if let Some(ref h) = last_hash {
-            if h.as_slice() == entry.canonical_hash.as_slice() {
-                self.conn.execute(
-                    "UPDATE entries SET last_seen_at = ?1
-                     WHERE id = (SELECT id FROM entries ORDER BY last_seen_at DESC LIMIT 1)",
-                    params![now],
-                )?;
-                return Ok(None);
-            }
+        if let Some(existing_id) = existing {
+            // Bump last_seen_at; pinned status is preserved (not touched).
+            self.conn.execute(
+                "UPDATE entries SET last_seen_at = ?1 WHERE id = ?2",
+                params![now, existing_id],
+            )?;
+            return Ok(None);
         }
 
         // -- Full insert inside a transaction --
         let tx = self.conn.unchecked_transaction()?;
 
+        // Extract metadata fields for persistence.
+        let (image_width, image_height) = match entry.metadata.image_dimensions {
+            Some((w, h)) => (Some(w), Some(h)),
+            None => (None, None),
+        };
+        let file_count: Option<i64> = entry.metadata.file_count.map(|c| c as i64);
+
         tx.execute(
             "INSERT INTO entries
-                 (created_at, last_seen_at, pinned, ephemeral, content_class, preview_text, source_app, canonical_hash)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                 (created_at, last_seen_at, pinned, ephemeral, content_class, preview_text, source_app, canonical_hash,
+                  image_width, image_height, file_count, url_domain)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 now,
                 now,
@@ -115,6 +121,10 @@ impl ClipStore {
                 entry.preview_text,
                 entry.source_app,
                 entry.canonical_hash.as_slice(),
+                image_width,
+                image_height,
+                file_count,
+                entry.metadata.url_domain,
             ],
         )?;
 
@@ -201,7 +211,8 @@ impl ClipStore {
         // Fetch the requested page.
         let select_sql = format!(
             "SELECT e.id, e.created_at, e.last_seen_at, e.pinned, e.ephemeral,
-                    e.content_class, e.preview_text, e.source_app
+                    e.content_class, e.preview_text, e.source_app,
+                    e.image_width, e.image_height, e.file_count, e.url_domain
              FROM entries e
              {where_clause}
              ORDER BY e.pinned DESC, e.last_seen_at DESC
@@ -237,7 +248,8 @@ impl ClipStore {
     pub fn get_entry(&self, id: EntryId) -> Result<EntrySummary> {
         let mut stmt = self.conn.prepare(
             "SELECT id, created_at, last_seen_at, pinned, ephemeral,
-                    content_class, preview_text, source_app
+                    content_class, preview_text, source_app,
+                    image_width, image_height, file_count, url_domain
              FROM entries WHERE id = ?1",
         )?;
 
@@ -669,12 +681,22 @@ impl ClipStore {
 ///
 /// Expected column order:
 ///   0: id, 1: created_at, 2: last_seen_at, 3: pinned, 4: ephemeral,
-///   5: content_class, 6: preview_text, 7: source_app
+///   5: content_class, 6: preview_text, 7: source_app,
+///   8: image_width, 9: image_height, 10: file_count, 11: url_domain
 fn row_to_summary_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<EntrySummary> {
     let class_str: String = row.get(5)?;
     let content_class: ContentClass = class_str
         .parse()
         .unwrap_or(ContentClass::Text);
+
+    let image_width: Option<u32> = row.get(8)?;
+    let image_height: Option<u32> = row.get(9)?;
+    let image_dimensions = match (image_width, image_height) {
+        (Some(w), Some(h)) => Some((w, h)),
+        _ => None,
+    };
+    let file_count: Option<i64> = row.get(10)?;
+    let url_domain: Option<String> = row.get(11)?;
 
     Ok(EntrySummary {
         id: row.get(0)?,
@@ -687,6 +709,11 @@ fn row_to_summary_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<EntrySummary>
         source_app: row.get(7)?,
         thumbnail: None, // Loaded separately.
         match_ranges: vec![],
+        metadata: EntryMetadata {
+            image_dimensions,
+            file_count: file_count.map(|c| c as usize),
+            url_domain,
+        },
     })
 }
 

@@ -24,17 +24,30 @@ pub fn run_migrations(conn: &rusqlite::Connection) -> Result<()> {
     let version = current.unwrap_or(0);
 
     if version < 1 {
-        tracing::info!("applying migration v1: initial schema");
+        tracing::info!("applying migration v1: initial schema (includes v2 columns)");
+        // init_schema creates the entries table with all columns including
+        // the v2 metadata columns (image_width, image_height, file_count,
+        // url_domain), so a fresh database starts at version 2.
         schema::init_schema(conn)?;
 
         if current.is_none() {
-            conn.execute("INSERT INTO schema_version (version) VALUES (?1)", [1u32])?;
+            conn.execute("INSERT INTO schema_version (version) VALUES (?1)", [2u32])?;
         } else {
             conn.execute(
                 "UPDATE schema_version SET version = ?1",
-                [1u32],
+                [2u32],
             )?;
         }
+    } else if version < 2 {
+        // Existing database created with v1 schema — add the metadata columns.
+        tracing::info!("applying migration v2: add metadata columns to entries");
+        conn.execute_batch(
+            "ALTER TABLE entries ADD COLUMN image_width  INTEGER;
+             ALTER TABLE entries ADD COLUMN image_height INTEGER;
+             ALTER TABLE entries ADD COLUMN file_count   INTEGER;
+             ALTER TABLE entries ADD COLUMN url_domain   TEXT;",
+        )?;
+        conn.execute("UPDATE schema_version SET version = ?1", [2u32])?;
     }
 
     Ok(())

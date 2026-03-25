@@ -23,7 +23,11 @@ pub fn init_schema(conn: &rusqlite::Connection) -> Result<()> {
              content_class TEXT    NOT NULL,
              preview_text  TEXT,
              source_app    TEXT,
-             canonical_hash BLOB  NOT NULL
+             canonical_hash BLOB  NOT NULL,
+             image_width   INTEGER,
+             image_height  INTEGER,
+             file_count    INTEGER,
+             url_domain    TEXT
          );",
     )?;
 

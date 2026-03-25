@@ -366,10 +366,16 @@ async fn wl_fetch(mime: &str) -> Result<Vec<u8>> {
 pub async fn run(state: Arc<AppState>) -> Result<()> {
     let (tx, rx) = mpsc::channel::<ClipboardEvent>(64);
 
-    // TODO: Direct Wayland protocol backend (data-control) is higher priority
-    // but not yet implemented.  WaylandBackend::connect() currently always
-    // returns Err.  Once the wayland-client integration is complete, add it
-    // as the first option here.
+    if let Ok(mut backend) = WaylandBackend::connect() {
+        info!("using direct Wayland data-control backend");
+        tokio::spawn(async move {
+            if let Err(error) = backend.watch(tx).await {
+                error!(error = %error, "direct Wayland backend failed");
+            }
+        });
+        process_events(state, rx).await;
+        return Ok(());
+    }
 
     // wl-paste/wl-copy subprocess backend.
     if WlPasteBackend::available() {
@@ -458,6 +464,7 @@ async fn handle_event(state: &AppState, event: ClipboardEvent) -> Result<()> {
         representations: processed.representations.clone(),
         source_app: source_app.clone(),
         ephemeral: is_ephemeral,
+        metadata: processed.metadata.clone(),
     };
 
     // Insert into the store (via spawn_blocking since rusqlite is !Send-safe
@@ -484,6 +491,8 @@ async fn handle_event(state: &AppState, event: ClipboardEvent) -> Result<()> {
             preview_text: processed.preview_text,
             source_app,
             thumbnail: processed.thumbnail,
+            match_ranges: vec![],
+            metadata: processed.metadata,
         };
         let _ = state.new_entry_tx.send(broadcast);
     } else {
@@ -508,9 +517,6 @@ pub async fn restore_to_clipboard(representations: Vec<Representation>) -> Resul
         ));
     }
 
-    let backend = WaylandBackend::connect()?;
-
-    // Convert Representation -> the backend format.
     let reps: Vec<Representation> = representations
         .into_iter()
         .map(|r| Representation {
@@ -519,7 +525,18 @@ pub async fn restore_to_clipboard(representations: Vec<Representation>) -> Resul
         })
         .collect();
 
-    backend.set_selection(reps).await
+    if let Ok(backend) = WaylandBackend::connect() {
+        return backend.set_selection(reps.clone()).await;
+    }
+
+    if WlPasteBackend::available() {
+        return WlPasteBackend.set_selection(reps).await;
+    }
+
+    Err(NixClipError::Wayland(
+        "no clipboard restore backend available; install wl-clipboard or enable direct data-control support"
+            .into(),
+    ))
 }
 
 #[cfg(test)]

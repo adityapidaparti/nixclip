@@ -99,6 +99,8 @@ pub struct NewEntry {
     pub representations: Vec<MimePayload>,
     pub source_app: Option<String>,
     pub ephemeral: bool,
+    #[serde(default)]
+    pub metadata: EntryMetadata,
 }
 
 // ---------------------------------------------------------------------------
@@ -122,6 +124,9 @@ pub struct EntrySummary {
     /// Each tuple is (start_byte, length_bytes). Empty when there is no query.
     #[serde(default)]
     pub match_ranges: Vec<(u32, u32)>,
+    /// Optional metadata persisted from pipeline processing.
+    #[serde(default)]
+    pub metadata: EntryMetadata,
 }
 
 // ---------------------------------------------------------------------------
@@ -181,7 +186,7 @@ pub struct ProcessedEntry {
 // EntryMetadata
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct EntryMetadata {
     pub image_dimensions: Option<(u32, u32)>,
     pub file_count: Option<usize>,
