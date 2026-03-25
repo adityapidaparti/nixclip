@@ -405,6 +405,11 @@ async fn process_events(state: Arc<AppState>, mut rx: mpsc::Receiver<ClipboardEv
 }
 
 /// Process a single clipboard event.
+///
+/// Privacy filtering is split into two phases so that content-based regex
+/// patterns (e.g. API-key detection) run *after* the content processor has
+/// produced the preview text, while cheaper app-name / MIME-type checks
+/// still short-circuit before the expensive processing step.
 async fn handle_event(state: &AppState, event: ClipboardEvent) -> Result<()> {
     let ClipboardEvent {
         offered_mimes,
@@ -418,16 +423,19 @@ async fn handle_event(state: &AppState, event: ClipboardEvent) -> Result<()> {
         return Ok(());
     }
 
-    // Run privacy filter.
+    // Phase 1: pre-content privacy check (app-name + MIME-type rules).
+    // This avoids the cost of content processing for events that would be
+    // rejected based on their source alone.
     {
         let filter = state.privacy_filter.read().await;
-        if matches!(
-            filter.check(source_app.as_deref(), &offered_mimes, None),
-            FilterResult::Reject
-        ) {
+        let pre_result = filter.check_pre_content(
+            source_app.as_deref(),
+            &offered_mimes,
+        );
+        if pre_result == FilterResult::Reject {
             debug!(
                 source_app = ?source_app,
-                "privacy filter rejected clipboard event"
+                "privacy filter rejected clipboard event (pre-content)"
             );
             return Ok(());
         }
@@ -436,23 +444,15 @@ async fn handle_event(state: &AppState, event: ClipboardEvent) -> Result<()> {
     // Process content (classification, hashing, thumbnails, etc.).
     let processed = ContentProcessor::process(payloads, source_app.clone())?;
 
-    let filter_result = {
+    // Phase 2: content-based privacy check (regex patterns on preview text).
+    // Patterns like API-key detectors need the preview text that the content
+    // processor just produced.
+    let ephemeral = {
         let filter = state.privacy_filter.read().await;
-        filter.check(
-            source_app.as_deref(),
-            &offered_mimes,
-            processed.preview_text.as_deref(),
-        )
+        filter.check_content_patterns(processed.preview_text.as_deref())
+            == FilterResult::Ephemeral
     };
-    if matches!(filter_result, FilterResult::Reject) {
-        debug!(
-            source_app = ?source_app,
-            "privacy filter rejected clipboard content after preview generation"
-        );
-        return Ok(());
-    }
-    let is_ephemeral = matches!(filter_result, FilterResult::Ephemeral);
-    if is_ephemeral {
+    if ephemeral {
         debug!("privacy filter flagged content as ephemeral");
     }
 
@@ -463,7 +463,7 @@ async fn handle_event(state: &AppState, event: ClipboardEvent) -> Result<()> {
         canonical_hash: processed.canonical_hash,
         representations: processed.representations.clone(),
         source_app: source_app.clone(),
-        ephemeral: is_ephemeral,
+        ephemeral,
         metadata: processed.metadata.clone(),
     };
 
@@ -486,7 +486,7 @@ async fn handle_event(state: &AppState, event: ClipboardEvent) -> Result<()> {
             created_at: chrono::Utc::now().timestamp_millis(),
             last_seen_at: chrono::Utc::now().timestamp_millis(),
             pinned: false,
-            ephemeral: is_ephemeral,
+            ephemeral,
             content_class: processed.content_class,
             preview_text: processed.preview_text,
             source_app,
@@ -530,7 +530,8 @@ pub async fn restore_to_clipboard(representations: Vec<Representation>) -> Resul
     }
 
     if WlPasteBackend::available() {
-        return WlPasteBackend.set_selection(reps).await;
+        let backend = WlPasteBackend;
+        return backend.set_selection(reps).await;
     }
 
     Err(NixClipError::Wayland(

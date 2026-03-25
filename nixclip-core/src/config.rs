@@ -66,6 +66,10 @@ fn default_max_blob_size_mb() -> u32 {
     500
 }
 
+fn default_ephemeral_ttl_hours() -> u32 {
+    24
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeneralConfig {
     #[serde(default = "default_max_entries")]
@@ -76,6 +80,11 @@ pub struct GeneralConfig {
 
     #[serde(default)]
     pub retention: Retention,
+
+    /// Time-to-live for ephemeral entries, in hours.  Ephemeral entries older
+    /// than this are deleted during the periodic prune pass.  Defaults to 24.
+    #[serde(default = "default_ephemeral_ttl_hours")]
+    pub ephemeral_ttl_hours: u32,
 }
 
 impl Default for GeneralConfig {
@@ -84,6 +93,7 @@ impl Default for GeneralConfig {
             max_entries: default_max_entries(),
             max_blob_size_mb: default_max_blob_size_mb(),
             retention: Retention::default(),
+            ephemeral_ttl_hours: default_ephemeral_ttl_hours(),
         }
     }
 }

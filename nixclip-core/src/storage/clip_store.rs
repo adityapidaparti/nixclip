@@ -472,6 +472,59 @@ impl ClipStore {
         })
     }
 
+    /// Delete ephemeral entries older than `ttl_hours`.
+    ///
+    /// Ephemeral entries are clipboard captures that matched a sensitive-content
+    /// pattern.  They are kept for a limited time so the user can still paste
+    /// them during the current session, but are cleaned up afterwards.
+    ///
+    /// Returns a [`PruneStats`] describing what was removed.
+    pub fn prune_ephemeral(&self, ttl_hours: u32) -> Result<PruneStats> {
+        let mut entries_deleted: u32 = 0;
+        let mut blobs_deleted: u32 = 0;
+        let mut bytes_freed: u64 = 0;
+
+        let cutoff = chrono::Utc::now().timestamp_millis()
+            - (ttl_hours as i64) * 3_600_000;
+
+        let expired_ids = self.collect_ids(
+            "SELECT id FROM entries WHERE ephemeral = 1 AND created_at < ?1",
+            params![cutoff],
+        )?;
+
+        if !expired_ids.is_empty() {
+            let blob_paths = self.blob_paths_for_ids_tx(&self.conn, &expired_ids)?;
+            let count = expired_ids.len() as u32;
+
+            let ph = placeholders(expired_ids.len());
+            let sql = format!("DELETE FROM entries WHERE id IN ({ph})");
+            let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+                expired_ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+            self.conn.execute(&sql, param_refs.as_slice())?;
+
+            for path in &blob_paths {
+                if let Ok(meta) = std::fs::metadata(self.blob_store_path(path)) {
+                    bytes_freed += meta.len();
+                }
+                let _ = self.blob_store.delete(path);
+                blobs_deleted += 1;
+            }
+
+            entries_deleted += count;
+
+            // Rebuild FTS after deletions.
+            if entries_deleted > 0 {
+                self.rebuild_fts()?;
+            }
+        }
+
+        Ok(PruneStats {
+            entries_deleted,
+            blobs_deleted,
+            bytes_freed,
+        })
+    }
+
     // -------------------------------------------------------------------
     // Stats
     // -------------------------------------------------------------------

@@ -43,6 +43,10 @@ pub async fn run(state: Arc<AppState>) -> Result<()> {
 }
 
 /// Run a single prune pass.
+///
+/// This performs both the standard retention/max-entries pruning **and**
+/// ephemeral-entry cleanup (entries flagged as ephemeral that have exceeded
+/// their TTL).
 pub fn run_once(state: &AppState) -> Result<PruneStats> {
     let config = state.config.blocking_read();
     let general = config.general.clone();
@@ -52,5 +56,24 @@ pub fn run_once(state: &AppState) -> Result<PruneStats> {
         nixclip_core::NixClipError::Config(format!("store mutex poisoned: {e}"))
     })?;
 
-    store.prune(&general)
+    // Standard retention / max-entries pruning.
+    let mut stats = store.prune(&general)?;
+
+    // Ephemeral entry cleanup — delete entries marked ephemeral whose
+    // created_at is older than the configured TTL.
+    let ephemeral_stats = store.prune_ephemeral(general.ephemeral_ttl_hours)?;
+
+    if ephemeral_stats.entries_deleted > 0 {
+        info!(
+            entries_deleted = ephemeral_stats.entries_deleted,
+            "ephemeral entries pruned"
+        );
+    }
+
+    // Merge the ephemeral stats into the overall stats.
+    stats.entries_deleted += ephemeral_stats.entries_deleted;
+    stats.blobs_deleted += ephemeral_stats.blobs_deleted;
+    stats.bytes_freed += ephemeral_stats.bytes_freed;
+
+    Ok(stats)
 }
