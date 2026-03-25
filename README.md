@@ -9,7 +9,7 @@ Three components:
 
 ## Install
 
-### NixOS (flake)
+Add the flake input and import the NixOS module in your `configuration.nix`:
 
 ```nix
 # flake.nix
@@ -18,9 +18,8 @@ Three components:
 }
 ```
 
-Then in your `configuration.nix`:
-
 ```nix
+# configuration.nix
 { inputs, pkgs, ... }:
 {
   imports = [ inputs.nixclip.nixosModules.default ];
@@ -32,28 +31,7 @@ Then in your `configuration.nix`:
 }
 ```
 
-### Home Manager (flake)
-
-```nix
-{ inputs, pkgs, ... }:
-{
-  imports = [ inputs.nixclip.homeManagerModules.default ];
-
-  programs.nixclip = {
-    enable = true;
-    package = inputs.nixclip.packages.${pkgs.system}.default;
-  };
-}
-```
-
-### Overlay
-
-```nix
-nixpkgs.overlays = [ inputs.nixclip.overlays.default ];
-# Then use pkgs.nixclip anywhere
-```
-
-Either method gives you all three binaries and a systemd user service that starts with your graphical session.
+This gives you all three binaries and a systemd user service that starts with your graphical session.
 
 ## Quick Start
 
