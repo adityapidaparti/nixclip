@@ -3,6 +3,7 @@
 use nixclip_core::ipc::{ClientMessage, ServerMessage};
 use nixclip_core::{ContentClass, EntrySummary, Result};
 
+use crate::commands::{daemon_error, unexpected_response};
 use crate::ipc_client::IpcClient;
 
 /// Format a Unix timestamp (milliseconds) as a human-readable age string.
@@ -23,27 +24,20 @@ pub fn format_age(millis: i64) -> String {
     } else if diff_secs < 7 * 86400 {
         format!("{}d ago", diff_secs / 86400)
     } else {
-        // Format as "Mon DD" (e.g. "Mar 15")
-        let secs = millis / 1000;
-        time_from_unix_secs(secs)
+        time_from_unix_secs(millis / 1000)
     }
 }
 
-/// Very lightweight date formatter — produces "Mon DD" without pulling in chrono.
 fn time_from_unix_secs(secs: i64) -> String {
-    // Days since epoch (1970-01-01).
     let days = secs / 86400;
-    let (year, month, day) = days_to_ymd(days);
+    let (_, month, day) = days_to_ymd(days);
     let month_name = [
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ][(month - 1) as usize];
-    let _ = year; // not shown in the format
     format!("{} {}", month_name, day)
 }
 
-/// Convert days-since-epoch (1970-01-01) to (year, month, day).
 fn days_to_ymd(mut days: i64) -> (i64, i64, i64) {
-    // Algorithm from http://www.howardhinnant.com/date_algorithms.html
     days += 719468;
     let era = if days >= 0 { days } else { days - 146096 } / 146097;
     let doe = days - era * 146097;
@@ -57,52 +51,62 @@ fn days_to_ymd(mut days: i64) -> (i64, i64, i64) {
     (y, m, d)
 }
 
-/// Produce a short preview string for an entry.
 pub fn format_preview(entry: &EntrySummary) -> String {
     match &entry.content_class {
-        ContentClass::Image => {
-            // Show thumbnail dimensions if available (we don't have width/height here,
-            // so use a placeholder).
-            "[Image]".to_string()
-        }
+        ContentClass::Image => "[Image]".to_string(),
         ContentClass::Files => "[Files]".to_string(),
         _ => {
-            if let Some(text) = &entry.preview_text {
-                let trimmed = text.trim();
-                if trimmed.chars().count() > 38 {
-                    let truncated: String = trimmed.chars().take(36).collect();
-                    format!("{}…", truncated)
-                } else {
-                    trimmed.to_string()
-                }
+            let Some(text) = entry.preview_text.as_deref().map(str::trim) else {
+                return String::new();
+            };
+
+            if text.chars().count() > 38 {
+                let truncated: String = text.chars().take(36).collect();
+                format!("{}…", truncated)
             } else {
-                String::new()
+                text.to_string()
             }
         }
     }
 }
 
-/// Print a table row for a single entry.
 pub fn print_entry_row(entry: &EntrySummary) {
     let pin_marker = if entry.pinned { "*" } else { " " };
-    let type_label = entry.content_class.as_str();
-    let preview = format_preview(entry);
-    let age = format_age(entry.created_at);
-
     println!(
         " {pin_marker}{id:<5}│ {type_:<9}│ {preview:<38}│ {age}",
         pin_marker = pin_marker,
         id = entry.id,
-        type_ = type_label,
-        preview = preview,
-        age = age,
+        type_ = entry.content_class.as_str(),
+        preview = format_preview(entry),
+        age = format_age(entry.created_at),
     );
 }
 
-/// Print the table header.
 pub fn print_table_header() {
     println!(" ID    │ Type      │ Preview                               │ Age");
     println!("───────┼───────────┼───────────────────────────────────────┼────────");
+}
+
+pub fn entry_json(entry: &EntrySummary, has_thumbnail: bool) -> serde_json::Value {
+    let mut value = serde_json::json!({
+        "id": entry.id,
+        "content_class": entry.content_class.as_str(),
+        "preview": entry.preview_text,
+        "pinned": entry.pinned,
+        "ephemeral": entry.ephemeral,
+        "created_at": entry.created_at,
+        "last_seen_at": entry.last_seen_at,
+        "source_app": entry.source_app,
+        "age": format_age(entry.created_at),
+    });
+
+    if has_thumbnail {
+        if let Some(obj) = value.as_object_mut() {
+            obj.insert("has_thumbnail".to_string(), serde_json::json!(true));
+        }
+    }
+
+    value
 }
 
 pub async fn run(
@@ -117,18 +121,7 @@ pub async fn run(
         ServerMessage::QueryResult { entries, total, .. } => {
             if json {
                 for entry in &entries {
-                    let obj = serde_json::json!({
-                        "id": entry.id,
-                        "content_class": entry.content_class.as_str(),
-                        "preview": entry.preview_text,
-                        "pinned": entry.pinned,
-                        "ephemeral": entry.ephemeral,
-                        "created_at": entry.created_at,
-                        "last_seen_at": entry.last_seen_at,
-                        "source_app": entry.source_app,
-                        "age": format_age(entry.created_at),
-                    });
-                    println!("{}", obj);
+                    println!("{}", entry_json(entry, false));
                 }
             } else {
                 if entries.is_empty() {
@@ -148,14 +141,8 @@ pub async fn run(
                 );
             }
         }
-        ServerMessage::Error { message, .. } => {
-            eprintln!("Error from daemon: {}", message);
-            std::process::exit(1);
-        }
-        other => {
-            eprintln!("Unexpected response from daemon: {:?}", other);
-            std::process::exit(1);
-        }
+        ServerMessage::Error { message, .. } => daemon_error(message),
+        other => unexpected_response(other),
     }
 
     Ok(())

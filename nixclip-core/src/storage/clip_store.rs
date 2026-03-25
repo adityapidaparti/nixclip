@@ -1,7 +1,6 @@
+use rusqlite::params;
 use std::collections::HashSet;
 use std::path::Path;
-
-use rusqlite::params;
 
 use crate::config::GeneralConfig;
 use crate::error::Result;
@@ -404,7 +403,7 @@ impl ClipStore {
                 self.conn.execute(&sql, param_refs.as_slice())?;
 
                 for path in &blob_paths {
-                    if let Ok(meta) = std::fs::metadata(self.blob_store_path(path)) {
+                    if let Ok(meta) = std::fs::metadata(self.blob_store.base_dir.join(path)) {
                         bytes_freed += meta.len();
                     }
                     let _ = self.blob_store.delete(path);
@@ -440,7 +439,7 @@ impl ClipStore {
                 self.conn.execute(&sql, param_refs.as_slice())?;
 
                 for path in &blob_paths {
-                    if let Ok(meta) = std::fs::metadata(self.blob_store_path(path)) {
+                    if let Ok(meta) = std::fs::metadata(self.blob_store.base_dir.join(path)) {
                         bytes_freed += meta.len();
                     }
                     let _ = self.blob_store.delete(path);
@@ -500,7 +499,7 @@ impl ClipStore {
             self.conn.execute(&sql, param_refs.as_slice())?;
 
             for path in &blob_paths {
-                if let Ok(meta) = std::fs::metadata(self.blob_store_path(path)) {
+                if let Ok(meta) = std::fs::metadata(self.blob_store.base_dir.join(path)) {
                     bytes_freed += meta.len();
                 }
                 let _ = self.blob_store.delete(path);
@@ -707,20 +706,6 @@ impl ClipStore {
             set.insert(r?);
         }
         Ok(set)
-    }
-
-    /// Resolve a blob relative path to its absolute path for metadata queries.
-    fn blob_store_path(&self, rel: &str) -> std::path::PathBuf {
-        self.blob_store_base().join(rel)
-    }
-
-    /// Return the blob store base directory.
-    fn blob_store_base(&self) -> &Path {
-        // The blob_store's base_dir is not exposed publicly, but we can
-        // reconstruct it from the db_path sibling.  Instead, just use the
-        // blob_store.exists() / delete() methods which already know the path.
-        // For metadata, we'll access the field directly since it is crate-local.
-        &self.blob_store.base_dir
     }
 }
 

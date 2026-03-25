@@ -5,7 +5,6 @@ use gtk4::glib;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-/// Search input widget with built-in debounce.
 pub struct SearchBar {
     pub entry: gtk::SearchEntry,
 }
@@ -22,7 +21,6 @@ impl SearchBar {
         Self { entry }
     }
 
-    /// Connect a callback that fires when search text changes, with a 100ms debounce.
     pub fn connect_search_changed(&self, callback: impl Fn(String) + 'static) {
         let callback = Rc::new(callback);
         let timeout_id: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
@@ -31,7 +29,6 @@ impl SearchBar {
             let text = entry.text().to_string();
             let cb = callback.clone();
 
-            // Cancel any pending debounce timer.
             if let Some(id) = timeout_id.borrow_mut().take() {
                 id.remove();
             }
@@ -40,15 +37,10 @@ impl SearchBar {
             let id =
                 glib::timeout_add_local_once(std::time::Duration::from_millis(100), move || {
                     cb(text);
-                    // Clear the stored id since the timer has fired.
                     timeout_id_clone.borrow_mut().take();
                 });
             *timeout_id.borrow_mut() = Some(id);
         });
-    }
-
-    pub fn get_text(&self) -> String {
-        self.entry.text().to_string()
     }
 
     pub fn clear(&self) {

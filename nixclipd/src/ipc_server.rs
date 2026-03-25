@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+#[cfg(target_os = "linux")]
 use nix::libc;
 use tokio::net::{UnixListener, UnixStream};
 use tracing::{debug, error, info, warn};

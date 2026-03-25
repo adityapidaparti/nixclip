@@ -4,7 +4,6 @@ use gtk4::gdk;
 use gtk4::glib;
 use nixclip_core::{ContentClass, EntrySummary};
 
-/// A single row in the clipboard history list.
 pub struct EntryRow {
     pub container: gtk::Box,
     pub entry: EntrySummary,
@@ -12,41 +11,26 @@ pub struct EntryRow {
 
 impl EntryRow {
     pub fn new(entry: &EntrySummary) -> Self {
-        // Outer horizontal box.
         let container = gtk::Box::new(gtk::Orientation::Horizontal, 12);
         container.set_margin_start(12);
         container.set_margin_end(12);
         container.set_margin_top(6);
         container.set_margin_bottom(6);
 
-        // --- Badge ---
         let badge = build_badge(entry.content_class);
         container.append(&badge);
 
-        // --- Center: preview + source app (vertical) ---
         let center_box = gtk::Box::new(gtk::Orientation::Vertical, 2);
         center_box.set_hexpand(true);
         center_box.set_valign(gtk::Align::Center);
 
         if entry.content_class == ContentClass::Image {
-            // Show thumbnail if available, otherwise a placeholder label.
-            if let Some(ref thumb_data) = entry.thumbnail {
-                if let Some(picture) = build_thumbnail(thumb_data) {
-                    center_box.append(&picture);
-                } else {
-                    let fallback = gtk::Label::new(Some("[Image]"));
-                    fallback.add_css_class("dim-label");
-                    fallback.set_halign(gtk::Align::Start);
-                    center_box.append(&fallback);
-                }
+            if let Some(picture) = entry.thumbnail.as_deref().and_then(build_thumbnail) {
+                center_box.append(&picture);
             } else {
-                let fallback = gtk::Label::new(Some("[Image]"));
-                fallback.add_css_class("dim-label");
-                fallback.set_halign(gtk::Align::Start);
-                center_box.append(&fallback);
+                center_box.append(&image_placeholder());
             }
         } else {
-            // Text-based preview: up to 2 lines, ellipsized.
             let preview_text = entry.preview_text.as_deref().unwrap_or("[No preview]");
             let preview = gtk::Label::new(Some(preview_text));
             preview.set_halign(gtk::Align::Start);
@@ -61,7 +45,6 @@ impl EntryRow {
             center_box.append(&preview);
         }
 
-        // Source app (muted, small).
         if let Some(ref app) = entry.source_app {
             let source_label = gtk::Label::new(Some(&format!("\u{2500}\u{2500} {app}")));
             source_label.add_css_class("dim-label");
@@ -72,7 +55,6 @@ impl EntryRow {
 
         container.append(&center_box);
 
-        // --- Right side: timestamp + pin (vertical) ---
         let right_box = gtk::Box::new(gtk::Orientation::Vertical, 2);
         right_box.set_valign(gtk::Align::Center);
         right_box.set_halign(gtk::Align::End);
@@ -99,7 +81,6 @@ impl EntryRow {
     }
 }
 
-/// Build the colored content-class badge.
 fn build_badge(class: ContentClass) -> gtk::Label {
     let (text, css_class) = match class {
         ContentClass::Text => ("TXT", "badge-text"),
@@ -116,7 +97,6 @@ fn build_badge(class: ContentClass) -> gtk::Label {
     label
 }
 
-/// Try to build a small thumbnail from PNG/JPEG bytes.
 fn build_thumbnail(data: &[u8]) -> Option<gtk::Picture> {
     let bytes = glib::Bytes::from(data);
     let stream = gtk4::gio::MemoryInputStream::from_bytes(&bytes);
@@ -127,13 +107,11 @@ fn build_thumbnail(data: &[u8]) -> Option<gtk::Picture> {
     let picture = gtk::Picture::for_paintable(&texture);
     picture.set_content_fit(gtk::ContentFit::Contain);
     picture.set_can_shrink(true);
-    // Constrain to a reasonable size.
     picture.set_size_request(120, 90);
     picture.set_halign(gtk::Align::Start);
     Some(picture)
 }
 
-/// Format a Unix-millis timestamp into a human-readable relative string.
 pub fn format_relative_time(millis: i64) -> String {
     let now_ms = glib::DateTime::now_local()
         .map(|dt| dt.to_unix() * 1000)
@@ -184,4 +162,11 @@ pub fn format_relative_time(millis: i64) -> String {
             }
         }
     }
+}
+
+fn image_placeholder() -> gtk::Label {
+    let fallback = gtk::Label::new(Some("[Image]"));
+    fallback.add_css_class("dim-label");
+    fallback.set_halign(gtk::Align::Start);
+    fallback
 }

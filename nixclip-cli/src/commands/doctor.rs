@@ -1,6 +1,5 @@
 //! `nixclip doctor` — run diagnostic checks and report system health.
 
-use std::path::PathBuf;
 use std::process::Command;
 
 use nixclip_core::config::Config;
@@ -14,7 +13,7 @@ struct Check {
     detail: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 enum CheckStatus {
     Ok,
     Warning,
@@ -22,7 +21,7 @@ enum CheckStatus {
 }
 
 impl CheckStatus {
-    fn symbol(&self) -> &'static str {
+    fn symbol(self) -> &'static str {
         match self {
             CheckStatus::Ok => "OK",
             CheckStatus::Warning => "WARN",
@@ -32,53 +31,18 @@ impl CheckStatus {
 }
 
 pub async fn run(json: bool) -> Result<()> {
-    let mut checks: Vec<Check> = Vec::new();
-
-    // -----------------------------------------------------------------------
-    // 1. Daemon connectivity
-    // -----------------------------------------------------------------------
     let socket_path = Config::socket_path();
-    let daemon_check = check_daemon(&socket_path).await;
-    checks.push(daemon_check);
+    let mut checks = vec![
+        check_daemon(&socket_path).await,
+        check_runtime_dir(),
+        check_gnome_version(),
+        check_wayland_protocols(),
+        check_global_shortcuts_portal(),
+        check_config_file(),
+        check_db_file(),
+        check_blob_dir(),
+    ];
 
-    // -----------------------------------------------------------------------
-    // 2. XDG_RUNTIME_DIR
-    // -----------------------------------------------------------------------
-    checks.push(check_runtime_dir());
-
-    // -----------------------------------------------------------------------
-    // 3. GNOME version / support tier
-    // -----------------------------------------------------------------------
-    checks.push(check_gnome_version());
-
-    // -----------------------------------------------------------------------
-    // 4. Wayland clipboard protocol support
-    // -----------------------------------------------------------------------
-    checks.push(check_wayland_protocols());
-
-    // -----------------------------------------------------------------------
-    // 5. GlobalShortcuts portal availability
-    // -----------------------------------------------------------------------
-    checks.push(check_global_shortcuts_portal());
-
-    // -----------------------------------------------------------------------
-    // 6. Config file validity
-    // -----------------------------------------------------------------------
-    checks.push(check_config_file());
-
-    // -----------------------------------------------------------------------
-    // 7. Database file
-    // -----------------------------------------------------------------------
-    checks.push(check_db_file());
-
-    // -----------------------------------------------------------------------
-    // 8. Blob directory permissions
-    // -----------------------------------------------------------------------
-    checks.push(check_blob_dir());
-
-    // -----------------------------------------------------------------------
-    // 9. System info (informational, always Ok)
-    // -----------------------------------------------------------------------
     let session_type = std::env::var("XDG_SESSION_TYPE").unwrap_or_else(|_| "(not set)".into());
     let wayland_display = std::env::var("WAYLAND_DISPLAY").unwrap_or_else(|_| "(not set)".into());
 
@@ -93,9 +57,6 @@ pub async fn run(json: bool) -> Result<()> {
         detail: Some(wayland_display),
     });
 
-    // -----------------------------------------------------------------------
-    // Output
-    // -----------------------------------------------------------------------
     if json {
         let arr: Vec<serde_json::Value> = checks
             .iter()
@@ -163,8 +124,7 @@ async fn check_daemon(socket_path: &std::path::Path) -> Check {
 fn check_runtime_dir() -> Check {
     match std::env::var("XDG_RUNTIME_DIR") {
         Ok(dir) => {
-            let path = PathBuf::from(&dir);
-            if path.exists() {
+            if std::path::Path::new(&dir).exists() {
                 Check {
                     label: "XDG_RUNTIME_DIR".into(),
                     status: CheckStatus::Ok,
@@ -404,11 +364,9 @@ fn check_blob_dir() -> Check {
         };
     }
 
-    // Check we can read + write by inspecting metadata.
     match std::fs::metadata(&blob_dir) {
         Ok(meta) => {
             if meta.is_dir() {
-                // Try to check write permission by attempting to create a temp entry.
                 let test_path = blob_dir.join(".nixclip_write_test");
                 match std::fs::write(&test_path, b"") {
                     Ok(_) => {

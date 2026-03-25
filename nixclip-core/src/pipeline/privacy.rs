@@ -128,29 +128,10 @@ impl PrivacyFilter {
         mimes: &[String],
         preview_text: Option<&str>,
     ) -> FilterResult {
-        // 1. Check source application.
-        if let Some(app) = source_app {
-            if self.should_ignore_app(app) {
-                debug!(app, "clipboard rejected: ignored application");
-                return FilterResult::Reject;
-            }
+        match self.check_pre_content(source_app, mimes) {
+            FilterResult::Reject => FilterResult::Reject,
+            _ => self.check_content_patterns(preview_text),
         }
-
-        // 2. Check for sensitive MIME hints.
-        if self.respect_sensitive_hints && self.has_sensitive_mimes(mimes) {
-            debug!("clipboard rejected: sensitive MIME hint detected");
-            return FilterResult::Reject;
-        }
-
-        // 3. Check preview text against compiled patterns.
-        if let Some(text) = preview_text {
-            if self.matches_sensitive_pattern(text) {
-                debug!("clipboard marked ephemeral: matched sensitive pattern");
-                return FilterResult::Ephemeral;
-            }
-        }
-
-        FilterResult::Allow
     }
 
     // -----------------------------------------------------------------------

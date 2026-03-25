@@ -226,10 +226,10 @@ fn fetch_fts_candidates(
                        WHERE search_idx MATCH ? \
                        LIMIT 500";
             let mut stmt = conn.prepare(sql)?;
-            let result = stmt
+            let rows = stmt
                 .query_map([&fts_expr], row_to_summary)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
-            result
+            rows
         }
         Some(class) => {
             let sql = "SELECT e.id, e.created_at, e.last_seen_at, e.pinned, e.ephemeral, \
@@ -240,10 +240,10 @@ fn fetch_fts_candidates(
                          AND e.content_class = ? \
                        LIMIT 500";
             let mut stmt = conn.prepare(sql)?;
-            let result = stmt
+            let rows = stmt
                 .query_map([fts_expr.as_str(), class.as_str()], row_to_summary)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
-            result
+            rows
         }
     };
 
@@ -268,10 +268,10 @@ fn fetch_like_candidates(
                        WHERE preview_text LIKE ? ESCAPE '\\' \
                        LIMIT 500";
             let mut stmt = conn.prepare(sql)?;
-            let result = stmt
+            let rows = stmt
                 .query_map([&pattern], row_to_summary)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
-            result
+            rows
         }
         Some(class) => {
             let sql = "SELECT id, created_at, last_seen_at, pinned, ephemeral, \
@@ -281,10 +281,10 @@ fn fetch_like_candidates(
                          AND content_class = ? \
                        LIMIT 500";
             let mut stmt = conn.prepare(sql)?;
-            let result = stmt
+            let rows = stmt
                 .query_map([pattern.as_str(), class.as_str()], row_to_summary)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
-            result
+            rows
         }
     };
 
@@ -304,10 +304,10 @@ fn fetch_all_candidates(
                        ORDER BY last_seen_at DESC \
                        LIMIT 500";
             let mut stmt = conn.prepare(sql)?;
-            let result = stmt
+            let rows = stmt
                 .query_map([], row_to_summary)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
-            result
+            rows
         }
         Some(class) => {
             let sql = "SELECT id, created_at, last_seen_at, pinned, ephemeral, \
@@ -317,10 +317,10 @@ fn fetch_all_candidates(
                        ORDER BY last_seen_at DESC \
                        LIMIT 500";
             let mut stmt = conn.prepare(sql)?;
-            let result = stmt
+            let rows = stmt
                 .query_map([class.as_str()], row_to_summary)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
-            result
+            rows
         }
     };
 
@@ -446,51 +446,6 @@ fn score_candidates(
 }
 
 // ---------------------------------------------------------------------------
-// Simple fallback fuzzy scorer (used only if nucleo API is unavailable)
-// ---------------------------------------------------------------------------
-
-/// Subsequence fuzzy score with gap penalty.
-///
-/// Returns a value in [0.0, 100.0].
-///
-/// ```text
-/// score = (matched_chars / query_len) * 100 - (total_gaps * 2)
-/// ```
-#[allow(dead_code)]
-fn simple_fuzzy_score(query: &str, candidate: &str) -> f64 {
-    let query_chars: Vec<char> = query.to_lowercase().chars().collect();
-    let cand_chars: Vec<char> = candidate.to_lowercase().chars().collect();
-
-    if query_chars.is_empty() {
-        return 100.0;
-    }
-
-    let mut qi = 0;
-    let mut last_match: Option<usize> = None;
-    let mut total_gaps: usize = 0;
-    let mut matched: usize = 0;
-
-    for (ci, &cc) in cand_chars.iter().enumerate() {
-        if qi >= query_chars.len() {
-            break;
-        }
-        if cc == query_chars[qi] {
-            if let Some(prev) = last_match {
-                let gap = ci - prev - 1;
-                total_gaps += gap;
-            }
-            last_match = Some(ci);
-            matched += 1;
-            qi += 1;
-        }
-    }
-
-    let ratio = matched as f64 / query_chars.len() as f64;
-    let score = ratio * 100.0 - (total_gaps as f64 * 2.0);
-    score.max(0.0)
-}
-
-// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -533,18 +488,6 @@ mod tests {
     fn sanitize_empty_input() {
         assert!(sanitize_fts5_query("").is_none());
         assert!(sanitize_fts5_query("   ").is_none());
-    }
-
-    #[test]
-    fn simple_fuzzy_score_subsequence() {
-        let score = simple_fuzzy_score("ab", "axbx");
-        assert!(score > 0.0, "subsequence should match");
-    }
-
-    #[test]
-    fn simple_fuzzy_score_no_match() {
-        let score = simple_fuzzy_score("zz", "abc");
-        assert_eq!(score, 0.0);
     }
 
     #[test]

@@ -1,5 +1,3 @@
-//! The popup window -- the core of the NixClip UI.
-
 use adw::prelude::*;
 use gtk4 as gtk;
 use gtk4::gdk;
@@ -19,10 +17,6 @@ use crate::widgets::search_bar::SearchBar;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-// ---------------------------------------------------------------------------
-// Custom CSS for content-class badges
-// ---------------------------------------------------------------------------
-
 const BADGE_CSS: &str = r#"
 .badge-text { background-color: @blue_3; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.8em; font-weight: bold; }
 .badge-richtext { background-color: @purple_3; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.8em; font-weight: bold; }
@@ -31,11 +25,6 @@ const BADGE_CSS: &str = r#"
 .badge-url { background-color: @teal_3; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.8em; font-weight: bold; }
 "#;
 
-// ---------------------------------------------------------------------------
-// PopupWindow
-// ---------------------------------------------------------------------------
-
-/// The main clipboard-history popup window.
 pub struct PopupWindow {
     pub window: adw::ApplicationWindow,
     search_bar: SearchBar,
@@ -45,48 +34,39 @@ pub struct PopupWindow {
     empty_label: gtk::Label,
     spinner: gtk::Spinner,
     footer: Footer,
-    /// The entry rows currently displayed, kept so we can retrieve selection data.
     rows: Rc<RefCell<Vec<EntryRow>>>,
 }
 
 impl PopupWindow {
     pub fn new(app: &adw::Application, config: &Config) -> Self {
-        // --- Load custom CSS -------------------------------------------------
         load_badge_css();
 
         let width = config.ui.width.clamp(480, 1600) as i32;
         let visible_rows = config.ui.max_visible_entries.clamp(1, 16) as i32;
         let min_list_height = (visible_rows * 60).max(180);
 
-        // --- Window ----------------------------------------------------------
         let window = adw::ApplicationWindow::new(app);
         window.set_decorated(false);
         window.set_default_size(width, 500);
         window.set_resizable(false);
         window.set_hide_on_close(true);
 
-        // --- Layout ----------------------------------------------------------
         let outer_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
 
-        // Wrap content in an Adwaita Clamp for nice max-width behaviour.
         let clamp = adw::Clamp::new();
         clamp.set_maximum_size(width);
         clamp.set_tightening_threshold(600);
 
         let inner_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
 
-        // Search bar.
         let search_bar = SearchBar::new();
         inner_box.append(&search_bar.entry);
 
-        // Filter tabs.
         let filter_tabs = FilterTabs::new();
         inner_box.append(&filter_tabs.container);
 
-        // Separator.
         inner_box.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
 
-        // Empty / error state label (hidden by default).
         let empty_label = gtk::Label::new(None);
         empty_label.add_css_class("dim-label");
         empty_label.set_justify(gtk::Justification::Center);
@@ -97,14 +77,12 @@ impl PopupWindow {
         empty_label.set_margin_end(24);
         empty_label.set_visible(false);
 
-        // Loading spinner (hidden by default).
         let spinner = gtk::Spinner::new();
         spinner.set_halign(gtk::Align::Center);
         spinner.set_margin_top(24);
         spinner.set_margin_bottom(24);
         spinner.set_visible(false);
 
-        // Scrollable list.
         let list_box = gtk::ListBox::new();
         list_box.set_selection_mode(gtk::SelectionMode::Single);
         list_box.add_css_class("boxed-list");
@@ -119,10 +97,8 @@ impl PopupWindow {
         inner_box.append(&spinner);
         inner_box.append(&scrolled);
 
-        // Separator before footer.
         inner_box.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
 
-        // Footer.
         let footer = Footer::new();
         inner_box.append(&footer.container);
 
@@ -130,10 +106,8 @@ impl PopupWindow {
         outer_box.append(&clamp);
         window.set_content(Some(&outer_box));
 
-        // --- Request top-biased placement ------------------------------------
         position_top_center(&window);
 
-        // --- Build struct before wiring signals ------------------------------
         let rows: Rc<RefCell<Vec<EntryRow>>> = Rc::new(RefCell::new(Vec::new()));
 
         let popup = Self {
@@ -148,22 +122,14 @@ impl PopupWindow {
             rows,
         };
 
-        // --- Keyboard handling -----------------------------------------------
         popup.setup_key_controller();
 
-        // --- Focus-out handling ----------------------------------------------
         popup.setup_focus_out();
 
         popup
     }
 
-    // -----------------------------------------------------------------------
-    // Public API
-    // -----------------------------------------------------------------------
-
-    /// Populate the list with the given entries, replacing any existing rows.
     pub fn populate(&self, entries: Vec<EntrySummary>) {
-        // Clear existing rows.
         self.clear_list();
 
         if entries.is_empty() {
@@ -183,13 +149,11 @@ impl PopupWindow {
             row_vec.push(entry_row);
         }
 
-        // Select the first row.
         if let Some(first) = self.list_box.row_at_index(0) {
             self.list_box.select_row(Some(&first));
         }
     }
 
-    /// Return the `EntrySummary` for the currently selected row, if any.
     pub fn get_selected_entry(&self) -> Option<EntrySummary> {
         let selected_row = self.list_box.selected_row()?;
         let idx = selected_row.index() as usize;
@@ -197,12 +161,10 @@ impl PopupWindow {
         rows.get(idx).map(|r| r.entry.clone())
     }
 
-    /// Set the content-class filter (updates the tab UI).
     pub fn set_filter(&self, class: Option<ContentClass>) {
         self.filter_tabs.set_active(class);
     }
 
-    /// Show a centered message in the empty/informational state.
     pub fn show_empty_state(&self, message: &str) {
         self.scrolled.set_visible(false);
         self.spinner.set_visible(false);
@@ -211,12 +173,6 @@ impl PopupWindow {
         self.empty_label.set_visible(true);
     }
 
-    /// Show an error message.
-    pub fn show_error_state(&self, message: &str) {
-        self.show_empty_state(message);
-    }
-
-    /// Show a loading spinner.
     pub fn show_loading(&self) {
         self.scrolled.set_visible(false);
         self.empty_label.set_visible(false);
@@ -224,45 +180,33 @@ impl PopupWindow {
         self.spinner.set_spinning(true);
     }
 
-    /// Access the search bar for wiring external callbacks.
     pub fn search_bar(&self) -> &SearchBar {
         &self.search_bar
     }
 
-    /// Access the filter tabs for wiring external callbacks.
     pub fn filter_tabs(&self) -> &FilterTabs {
         &self.filter_tabs
     }
 
-    /// Update the "Showing N of M" result count in the footer.
     pub fn update_result_count(&self, shown: usize, total: u32) {
         self.footer.set_result_count(shown, total);
     }
 
-    /// Hide the result count in the footer.
     pub fn clear_result_count(&self) {
         self.footer.clear_result_count();
     }
 
-    /// Show or hide filter tab buttons based on which content classes have entries.
     pub fn update_visible_tabs(&self, counts: &HashMap<ContentClass, u32>) {
         self.filter_tabs.update_visible_tabs(counts);
     }
 
-    // -----------------------------------------------------------------------
-    // Internals
-    // -----------------------------------------------------------------------
-
-    /// Remove all rows from the list box.
     fn clear_list(&self) {
-        // Remove children from the list box.
         while let Some(child) = self.list_box.row_at_index(0) {
             self.list_box.remove(&child);
         }
         self.rows.borrow_mut().clear();
     }
 
-    /// Wire the `EventControllerKey` for keyboard shortcuts.
     fn setup_key_controller(&self) {
         let controller = gtk::EventControllerKey::new();
         let window = self.window.clone();
@@ -274,18 +218,13 @@ impl PopupWindow {
             let shift = state.contains(gdk::ModifierType::SHIFT_MASK);
 
             match keyval {
-                // Escape -> close popup.
                 gdk::Key::Escape => {
                     window.close();
                     glib::Propagation::Stop
                 }
 
-                // Return -> restore selected entry.
                 gdk::Key::Return | gdk::Key::KP_Enter => {
                     if shift {
-                        // Shift+Return: plain-text restore.
-                        // The actual restore is handled by app.rs via a signal;
-                        // we emit an action on the window.
                         window.activate_action("win.restore-plain", None);
                     } else {
                         window.activate_action("win.restore-original", None);
@@ -293,31 +232,26 @@ impl PopupWindow {
                     glib::Propagation::Stop
                 }
 
-                // Ctrl+BackSpace -> delete selected entry.
                 gdk::Key::BackSpace if ctrl => {
                     window.activate_action("win.delete-entry", None);
                     glib::Propagation::Stop
                 }
 
-                // Ctrl+P -> pin/unpin.
                 gdk::Key::p | gdk::Key::P if ctrl => {
                     window.activate_action("win.toggle-pin", None);
                     glib::Propagation::Stop
                 }
 
-                // Ctrl+Shift+Delete -> clear all.
                 gdk::Key::Delete if ctrl && shift => {
                     window.activate_action("win.clear-all", None);
                     glib::Propagation::Stop
                 }
 
-                // Ctrl+comma -> open settings.
                 gdk::Key::comma if ctrl => {
                     window.activate_action("win.open-settings", None);
                     glib::Propagation::Stop
                 }
 
-                // Ctrl+1..5 -> filter tabs.
                 gdk::Key::_1 if ctrl => {
                     window.activate_action("win.filter", Some(&0i32.to_variant()));
                     glib::Propagation::Stop
@@ -339,14 +273,11 @@ impl PopupWindow {
                     glib::Propagation::Stop
                 }
 
-                // Any printable character -> redirect to search entry.
                 _ if !ctrl && !shift => {
                     if let Some(ch) = keyval.to_unicode() {
                         if ch.is_alphanumeric() || ch.is_ascii_punctuation() || ch == ' ' {
-                            // Only grab focus if the search entry doesn't already have it.
                             if !search_entry.has_focus() {
                                 search_entry.grab_focus();
-                                // Insert the character.
                                 let mut pos = search_entry.text().len() as i32;
                                 search_entry.insert_text(&ch.to_string(), &mut pos);
                                 search_entry.set_position(pos);
@@ -364,18 +295,10 @@ impl PopupWindow {
         self.window.add_controller(controller);
     }
 
-    /// Close the window when it loses focus (with a small grace period to avoid
-    /// transient focus losses, e.g., when opening a dialog).
     fn setup_focus_out(&self) {
-        let window = self.window.clone();
-        let is_active = window.property::<bool>("is-active");
-        let _ = is_active; // we read it below via notify
-
         self.window
             .connect_notify_local(Some("is-active"), move |win, _| {
                 if !win.is_active() {
-                    // Small delay so that transient focus changes (e.g., opening
-                    // a confirmation dialog) don't dismiss us immediately.
                     let w = win.clone();
                     glib::timeout_add_local_once(
                         std::time::Duration::from_millis(150),
@@ -390,11 +313,6 @@ impl PopupWindow {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/// Load the badge CSS via a CssProvider so Adwaita named colors resolve.
 fn load_badge_css() {
     let provider = gtk::CssProvider::new();
     provider.load_from_string(BADGE_CSS);
@@ -408,14 +326,6 @@ fn load_badge_css() {
     }
 }
 
-/// Request a top-biased presentation hint without assuming compositor-managed
-/// placement can be controlled by the client on Wayland.
 fn position_top_center(window: &adw::ApplicationWindow) {
-    // GTK4 on Wayland does not allow arbitrary window positioning by the
-    // client.  On X11 the window manager handles placement.  We set a top
-    // margin so that the content at least looks visually top-biased inside
-    // the window, and rely on the WM / layer-shell for actual screen
-    // positioning.  If a surface/layer-shell protocol is available, the
-    // caller can use it.
     window.set_margin_top(48);
 }

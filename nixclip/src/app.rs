@@ -1,8 +1,3 @@
-//! Application state and lifecycle for the NixClip popup UI.
-//!
-//! Handles window creation, IPC connection, activation-token presentation,
-//! and wiring keyboard-shortcut actions to the daemon.
-
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -66,8 +61,6 @@ impl UiHandle {
     }
 }
 
-/// Called by `Application::connect_activate` or `connect_command_line`.
-/// Reuses a single popup window inside the primary process.
 pub(crate) fn activate(
     app: &adw::Application,
     state: &Rc<RefCell<Option<UiHandle>>>,
@@ -93,31 +86,13 @@ fn setup_actions(
     add_action(win, "restore-original", None, {
         let p = popup.clone();
         let i = ipc.clone();
-        move |_, _| {
-            if let Some(entry) = p.get_selected_entry() {
-                i.restore(entry.id, RestoreMode::Original, |result| {
-                    if let Err(error) = result {
-                        tracing::warn!(error = %error, "restore failed");
-                    }
-                });
-                p.window.close();
-            }
-        }
+        move |_, _| restore_selected_entry(&p, &i, RestoreMode::Original, "restore failed")
     });
 
     add_action(win, "restore-plain", None, {
         let p = popup.clone();
         let i = ipc.clone();
-        move |_, _| {
-            if let Some(entry) = p.get_selected_entry() {
-                i.restore(entry.id, RestoreMode::PlainText, |result| {
-                    if let Err(error) = result {
-                        tracing::warn!(error = %error, "restore plain failed");
-                    }
-                });
-                p.window.close();
-            }
-        }
+        move |_, _| restore_selected_entry(&p, &i, RestoreMode::PlainText, "restore plain failed")
     });
 
     add_action(win, "delete-entry", None, {
@@ -179,19 +154,17 @@ fn setup_actions(
             dialog.set_default_response(Some("cancel"));
             dialog.set_close_response("cancel");
 
-            let pp = p.clone();
-            let ii = i.clone();
-            let qq = q.clone();
             dialog.connect_response(None, move |_dlg, response| {
                 if response == "clear" {
-                    let ppp = pp.clone();
-                    let iii = ii.clone();
-                    let qqq = qq.clone();
+                    let pp = p.clone();
+                    let ii = i.clone();
+                    let qq = q.clone();
+                    let ii_cb = ii.clone();
                     ii.clear_unpinned(move |result| {
                         if let Err(error) = result {
                             tracing::warn!(error = %error, "clear all failed");
                         } else {
-                            load_entries(&ppp, &iii, &qqq);
+                            load_entries(&pp, &ii_cb, &qq);
                         }
                     });
                 }
@@ -330,12 +303,10 @@ fn load_entries(
     query_state: &Rc<RefCell<QueryState>>,
 ) {
     let state = query_state.borrow().clone();
-    let empty_message = if let Some(query) = &state.text {
-        format!("No matches for '{query}'. Try a different search.")
-    } else if state.class.is_some() {
-        "No clipboard history for the selected filter.".to_string()
-    } else {
-        "No clipboard history yet.\nCopy something to get started.".to_string()
+    let empty_message = match (state.text.as_deref(), state.class) {
+        (Some(query), _) => format!("No matches for '{query}'. Try a different search."),
+        (None, Some(_)) => "No clipboard history for the selected filter.".to_string(),
+        (None, None) => "No clipboard history yet.\nCopy something to get started.".to_string(),
     };
 
     let update_tabs = state.class.is_none();
@@ -363,7 +334,7 @@ fn load_entries(
         }
         Err(error) => {
             p.clear_result_count();
-            p.show_error_state(&format!(
+            p.show_empty_state(&format!(
                 "Cannot connect to nixclipd.\n\
                  Is the daemon running?\n\n\
                  Run 'nixclip doctor' for diagnostics.\n\n\
@@ -371,4 +342,23 @@ fn load_entries(
             ));
         }
     });
+}
+
+fn restore_selected_entry(
+    popup: &Rc<PopupWindow>,
+    ipc: &Rc<UiIpcClient>,
+    mode: RestoreMode,
+    error_message: &'static str,
+) {
+    let Some(entry) = popup.get_selected_entry() else {
+        return;
+    };
+
+    let popup = popup.clone();
+    ipc.restore(entry.id, mode, move |result| {
+        if let Err(error) = result {
+            tracing::warn!(error = %error, "{error_message}");
+        }
+    });
+    popup.window.close();
 }

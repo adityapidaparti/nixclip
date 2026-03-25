@@ -3,7 +3,8 @@
 use nixclip_core::ipc::{ClientMessage, ServerMessage};
 use nixclip_core::Result;
 
-use crate::commands::list::{format_age, print_entry_row, print_table_header};
+use crate::commands::list::{entry_json, print_entry_row, print_table_header};
+use crate::commands::{daemon_error, unexpected_response};
 use crate::ipc_client::IpcClient;
 
 pub async fn run(
@@ -19,18 +20,7 @@ pub async fn run(
         ServerMessage::QueryResult { entries, total, .. } => {
             if json {
                 for entry in &entries {
-                    let obj = serde_json::json!({
-                        "id": entry.id,
-                        "content_class": entry.content_class.as_str(),
-                        "preview": entry.preview_text,
-                        "pinned": entry.pinned,
-                        "ephemeral": entry.ephemeral,
-                        "created_at": entry.created_at,
-                        "last_seen_at": entry.last_seen_at,
-                        "source_app": entry.source_app,
-                        "age": format_age(entry.created_at),
-                    });
-                    println!("{}", obj);
+                    println!("{}", entry_json(entry, false));
                 }
             } else {
                 if entries.is_empty() {
@@ -46,14 +36,8 @@ pub async fn run(
                 println!("Found {} of {} matching entries.", entries.len(), total);
             }
         }
-        ServerMessage::Error { message, .. } => {
-            eprintln!("Error from daemon: {}", message);
-            std::process::exit(1);
-        }
-        other => {
-            eprintln!("Unexpected response from daemon: {:?}", other);
-            std::process::exit(1);
-        }
+        ServerMessage::Error { message, .. } => daemon_error(message),
+        other => unexpected_response(other),
     }
 
     Ok(())

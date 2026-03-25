@@ -16,8 +16,8 @@ use ashpd::desktop::global_shortcuts::{GlobalShortcuts, NewShortcut};
 use ashpd::WindowIdentifier;
 #[cfg(target_os = "linux")]
 use futures_util::StreamExt;
-use tracing::{info, warn};
 use nixclip_core::error::Result;
+use tracing::{info, warn};
 
 use crate::AppState;
 

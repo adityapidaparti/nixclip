@@ -3,54 +3,29 @@
 use nixclip_core::ipc::{ClientMessage, ServerMessage};
 use nixclip_core::Result;
 
+use crate::commands::{daemon_error, unexpected_response};
 use crate::ipc_client::IpcClient;
 
 pub async fn run(client: &mut IpcClient, include_pinned: bool) -> Result<()> {
     if include_pinned {
-        // Clear all: first clear unpinned, then we'd need to unpin + clear,
-        // but the daemon only exposes ClearUnpinned. To clear everything,
-        // query all pinned entries, unpin them, then clear unpinned.
         eprintln!(
             "Warning: --include-pinned will unpin all entries before clearing. \
              This cannot be undone."
         );
 
-        // Fetch all pinned entries.
-        let query_msg = ClientMessage::query(None, None, 0, 10000);
-        let pinned_ids = match client.request(&query_msg).await? {
-            ServerMessage::QueryResult { entries, .. } => entries
-                .into_iter()
-                .filter(|e| e.pinned)
-                .map(|e| e.id)
-                .collect::<Vec<_>>(),
-            ServerMessage::Error { message, .. } => {
-                eprintln!("Error from daemon: {}", message);
-                std::process::exit(1);
-            }
-            other => {
-                eprintln!("Unexpected response from daemon: {:?}", other);
-                std::process::exit(1);
-            }
-        };
-
-        // Unpin each pinned entry.
-        for id in pinned_ids {
-            let unpin_msg = ClientMessage::pin(id, false);
-            match client.request(&unpin_msg).await? {
+        for id in pinned_ids(client).await? {
+            let msg = ClientMessage::pin(id, false);
+            match client.request(&msg).await? {
                 ServerMessage::Ok { .. } => {}
                 ServerMessage::Error { message, .. } => {
                     eprintln!("Error unpinning entry {}: {}", id, message);
                     std::process::exit(1);
                 }
-                other => {
-                    eprintln!("Unexpected response from daemon: {:?}", other);
-                    std::process::exit(1);
-                }
+                other => unexpected_response(other),
             }
         }
     }
 
-    // Now clear all unpinned entries.
     let msg = ClientMessage::clear_unpinned();
     match client.request(&msg).await? {
         ServerMessage::Ok { .. } => {
@@ -60,15 +35,22 @@ pub async fn run(client: &mut IpcClient, include_pinned: bool) -> Result<()> {
                 println!("Unpinned clipboard history cleared.");
             }
         }
-        ServerMessage::Error { message, .. } => {
-            eprintln!("Error from daemon: {}", message);
-            std::process::exit(1);
-        }
-        other => {
-            eprintln!("Unexpected response from daemon: {:?}", other);
-            std::process::exit(1);
-        }
+        ServerMessage::Error { message, .. } => daemon_error(message),
+        other => unexpected_response(other),
     }
 
     Ok(())
+}
+
+async fn pinned_ids(client: &mut IpcClient) -> Result<Vec<i64>> {
+    let query_msg = ClientMessage::query(None, None, 0, 10000);
+    match client.request(&query_msg).await? {
+        ServerMessage::QueryResult { entries, .. } => Ok(entries
+            .into_iter()
+            .filter(|entry| entry.pinned)
+            .map(|entry| entry.id)
+            .collect()),
+        ServerMessage::Error { message, .. } => daemon_error(message),
+        other => unexpected_response(other),
+    }
 }

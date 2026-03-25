@@ -1,5 +1,3 @@
-//! Settings window — AdwPreferencesWindow with General, Privacy, and About pages.
-
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -10,10 +8,6 @@ use libadwaita as adw;
 
 use nixclip_core::config::{Config, Retention};
 
-/// Build the settings preferences window.
-///
-/// `on_changed` is called whenever the user modifies a setting, with the
-/// updated `Config`.
 pub fn build_settings_window(
     app: &adw::Application,
     config: Config,
@@ -40,10 +34,6 @@ pub fn build_settings_window(
     window
 }
 
-// ---------------------------------------------------------------------------
-// Page 1 — General
-// ---------------------------------------------------------------------------
-
 fn build_general_page(
     window: &adw::PreferencesWindow,
     state: &Rc<RefCell<Config>>,
@@ -54,11 +44,9 @@ fn build_general_page(
     page.set_title("General");
     page.set_icon_name(Some("preferences-other-symbolic"));
 
-    // --- History group -------------------------------------------------------
     let group = adw::PreferencesGroup::new();
     group.set_title("History");
 
-    // Retention combo
     let retention_row = adw::ComboRow::new();
     retention_row.set_title("Keep History For");
     let labels = gtk::StringList::new(&[
@@ -82,7 +70,6 @@ fn build_general_page(
     }
     group.add(&retention_row);
 
-    // Max entries
     let adj = gtk::Adjustment::new(
         state.borrow().general.max_entries as f64,
         100.0,
@@ -103,7 +90,6 @@ fn build_general_page(
     }
     group.add(&max_row);
 
-    // Max blob size
     let adj2 = gtk::Adjustment::new(
         state.borrow().general.max_blob_size_mb as f64,
         100.0,
@@ -126,7 +112,6 @@ fn build_general_page(
 
     page.add(&group);
 
-    // --- Danger zone ---------------------------------------------------------
     let danger = adw::PreferencesGroup::new();
     danger.set_title("Danger Zone");
 
@@ -173,10 +158,6 @@ fn build_general_page(
     page
 }
 
-// ---------------------------------------------------------------------------
-// Page 2 — Privacy
-// ---------------------------------------------------------------------------
-
 fn build_privacy_page(
     state: &Rc<RefCell<Config>>,
     on_changed: Rc<dyn Fn(Config)>,
@@ -185,7 +166,6 @@ fn build_privacy_page(
     page.set_title("Privacy");
     page.set_icon_name(Some("security-high-symbolic"));
 
-    // --- Ignored apps --------------------------------------------------------
     let apps_group = adw::PreferencesGroup::new();
     apps_group.set_title("Ignored Applications");
     apps_group.set_description(Some(
@@ -206,7 +186,6 @@ fn build_privacy_page(
 
     page.add(&apps_group);
 
-    // --- Ignored patterns ----------------------------------------------------
     let pat_group = adw::PreferencesGroup::new();
     pat_group.set_title("Ignored Patterns");
     pat_group.set_description(Some(
@@ -228,7 +207,6 @@ fn build_privacy_page(
 
     page.add(&pat_group);
 
-    // --- Sensitive hints -----------------------------------------------------
     let hints_group = adw::PreferencesGroup::new();
     hints_group.set_title("Sensitive Content");
 
@@ -251,10 +229,6 @@ fn build_privacy_page(
     page
 }
 
-// ---------------------------------------------------------------------------
-// Page 3 — About
-// ---------------------------------------------------------------------------
-
 fn build_about_page(state: &Rc<RefCell<Config>>) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::new();
     page.set_title("About");
@@ -275,7 +249,6 @@ fn build_about_page(state: &Rc<RefCell<Config>>) -> adw::PreferencesPage {
 
     page.add(&info_group);
 
-    // Shortcut info
     let shortcut_group = adw::PreferencesGroup::new();
     shortcut_group.set_title("Shortcuts");
 
@@ -303,10 +276,6 @@ fn build_about_page(state: &Rc<RefCell<Config>>) -> adw::PreferencesPage {
 
     page
 }
-
-// ---------------------------------------------------------------------------
-// Retention ↔ ComboRow index helpers
-// ---------------------------------------------------------------------------
 
 fn retention_to_index(r: &Retention) -> u32 {
     match r {

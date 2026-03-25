@@ -6,7 +6,6 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-/// A row of toggle buttons for filtering entries by content class.
 pub struct FilterTabs {
     pub container: gtk::Box,
     active_filter: Rc<RefCell<Option<ContentClass>>>,
@@ -32,13 +31,11 @@ impl FilterTabs {
         let btn_files = gtk::ToggleButton::with_label("Files");
         let btn_links = gtk::ToggleButton::with_label("Links");
 
-        // Group all buttons so only one can be active at a time.
         btn_text.set_group(Some(&btn_all));
         btn_images.set_group(Some(&btn_all));
         btn_files.set_group(Some(&btn_all));
         btn_links.set_group(Some(&btn_all));
 
-        // "All" starts active.
         btn_all.set_active(true);
 
         container.append(&btn_all);
@@ -58,8 +55,6 @@ impl FilterTabs {
         }
     }
 
-    /// Connect a callback that fires whenever the selected filter changes.
-    /// The callback receives `None` for "All" or `Some(ContentClass)` for a specific class.
     pub fn connect_filter_changed(&self, callback: impl Fn(Option<ContentClass>) + 'static) {
         let callback = Rc::new(callback);
         let active = self.active_filter.clone();
@@ -82,9 +77,6 @@ impl FilterTabs {
         wire_button(&self.btn_links, Some(ContentClass::Url));
     }
 
-    /// Show or hide filter tab buttons based on which content classes have
-    /// entries.  The "All" tab is always visible.  If the currently active
-    /// filter becomes hidden, automatically switch back to "All".
     pub fn update_visible_tabs(&self, counts: &HashMap<ContentClass, u32>) {
         let has_text = counts.get(&ContentClass::Text).copied().unwrap_or(0)
             + counts.get(&ContentClass::RichText).copied().unwrap_or(0);
@@ -97,10 +89,9 @@ impl FilterTabs {
         self.btn_files.set_visible(has_files > 0);
         self.btn_links.set_visible(has_links > 0);
 
-        // If the currently active filter tab has been hidden, revert to "All".
         let active = *self.active_filter.borrow();
         let active_hidden = match active {
-            None => false, // "All" is always visible
+            None => false,
             Some(ContentClass::Text) | Some(ContentClass::RichText) => has_text == 0,
             Some(ContentClass::Image) => has_images == 0,
             Some(ContentClass::Files) => has_files == 0,
@@ -112,7 +103,6 @@ impl FilterTabs {
         }
     }
 
-    /// Programmatically select a filter tab.
     pub fn set_active(&self, class: Option<ContentClass>) {
         match class {
             None => self.btn_all.set_active(true),

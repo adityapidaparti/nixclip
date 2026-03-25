@@ -124,7 +124,10 @@ impl WaylandProbe {
             None
         };
 
-        Self { protocol, seat_count }
+        Self {
+            protocol,
+            seat_count,
+        }
     }
 }
 
@@ -133,8 +136,9 @@ impl WaylandBackend {
     fn probe() -> Result<WaylandProbe> {
         let connection = Connection::connect_to_env()
             .map_err(|e| NixClipError::Wayland(format!("connect to Wayland display: {e}")))?;
-        let (globals, mut event_queue) = registry_queue_init::<WaylandRegistryState>(&connection)
-            .map_err(|e| NixClipError::Wayland(format!("enumerate Wayland globals: {e}")))?;
+        let (globals, mut event_queue) =
+            registry_queue_init::<WaylandRegistryState>(&connection)
+                .map_err(|e| NixClipError::Wayland(format!("enumerate Wayland globals: {e}")))?;
         let mut state = WaylandRegistryState;
         event_queue
             .roundtrip(&mut state)
@@ -186,16 +190,14 @@ impl WaylandBackend {
 #[async_trait]
 impl ClipboardBackend for WaylandBackend {
     async fn watch(&mut self, _tx: mpsc::Sender<ClipboardEvent>) -> Result<()> {
-        Err(NixClipError::Wayland(
-            format!(
-                "direct {} capture is detected but not implemented: \
+        Err(NixClipError::Wayland(format!(
+            "direct {} capture is detected but not implemented: \
                  watcher needs a persistent Wayland event-queue thread that owns \
                  wl_seat/data-control device objects and drains offer FDs on selection events \
                  (detected {} seat global(s))",
-                self.protocol.global_name(),
-                self.seat_count
-            ),
-        ))
+            self.protocol.global_name(),
+            self.seat_count
+        )))
     }
 }
 

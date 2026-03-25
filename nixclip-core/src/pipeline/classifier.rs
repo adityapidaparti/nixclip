@@ -11,7 +11,6 @@ use crate::ContentClass;
 /// 4. `text/plain` only                                    → [`ContentClass::Text`]
 /// 5. Otherwise                                            → `None`
 pub fn classify(offered_mimes: &[String]) -> Option<ContentClass> {
-    // Priority 1: Image
     if offered_mimes
         .iter()
         .any(|m| m == "image/png" || m == "image/jpeg")
@@ -19,7 +18,6 @@ pub fn classify(offered_mimes: &[String]) -> Option<ContentClass> {
         return Some(ContentClass::Image);
     }
 
-    // Priority 2: Files
     if offered_mimes
         .iter()
         .any(|m| m == "text/uri-list" || m == "x-special/gnome-copied-files")
@@ -27,7 +25,6 @@ pub fn classify(offered_mimes: &[String]) -> Option<ContentClass> {
         return Some(ContentClass::Files);
     }
 
-    // Priority 3: RichText (both html and plain must be present)
     let has_html = offered_mimes.iter().any(|m| m == "text/html");
     let has_plain = offered_mimes.iter().any(|m| m == "text/plain");
 
@@ -35,7 +32,6 @@ pub fn classify(offered_mimes: &[String]) -> Option<ContentClass> {
         return Some(ContentClass::RichText);
     }
 
-    // Priority 4: Plain text
     if has_plain {
         return Some(ContentClass::Text);
     }
@@ -55,41 +51,16 @@ pub fn classify_with_content(
     offered_mimes: &[String],
     text_content: Option<&str>,
 ) -> Option<ContentClass> {
-    // Priority 1: Image
-    if offered_mimes
-        .iter()
-        .any(|m| m == "image/png" || m == "image/jpeg")
-    {
-        return Some(ContentClass::Image);
-    }
-
-    // Priority 2: Files
-    if offered_mimes
-        .iter()
-        .any(|m| m == "text/uri-list" || m == "x-special/gnome-copied-files")
-    {
-        return Some(ContentClass::Files);
-    }
-
-    // Priority 3: RichText
-    let has_html = offered_mimes.iter().any(|m| m == "text/html");
-    let has_plain = offered_mimes.iter().any(|m| m == "text/plain");
-
-    if has_html && has_plain {
-        return Some(ContentClass::RichText);
-    }
-
-    // Priority 4: Text — with optional URL promotion
-    if has_plain {
-        if let Some(text) = text_content {
-            if looks_like_url(text.trim()) {
-                return Some(ContentClass::Url);
+    match classify(offered_mimes) {
+        Some(ContentClass::Text) => {
+            if text_content.is_some_and(|text| looks_like_url(text.trim())) {
+                Some(ContentClass::Url)
+            } else {
+                Some(ContentClass::Text)
             }
         }
-        return Some(ContentClass::Text);
+        other => other,
     }
-
-    None
 }
 
 /// Heuristic URL check used by [`classify_with_content`].

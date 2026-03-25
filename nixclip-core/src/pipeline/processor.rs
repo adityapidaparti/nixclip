@@ -22,7 +22,10 @@ impl ContentProcessor {
     /// Classification is performed with [`classifier::classify_with_content`]
     /// using the `text/plain` payload (if present) to allow URL promotion.
     /// Each content class is then dispatched to a dedicated internal handler.
-    pub fn process(offers: Vec<MimePayload>, source_app: Option<String>) -> Result<ProcessedEntry> {
+    pub fn process(
+        offers: Vec<MimePayload>,
+        _source_app: Option<String>,
+    ) -> Result<ProcessedEntry> {
         let offered_mimes: Vec<String> = offers.iter().map(|p| p.mime.clone()).collect();
 
         // Peek at plain text content for URL promotion.
@@ -46,10 +49,6 @@ impl ContentProcessor {
             ContentClass::Url => Self::process_url(&offers)?,
             ContentClass::Text => Self::process_text(&offers)?,
         };
-
-        // Attach source_app (stored by caller in NewEntry, not in ProcessedEntry
-        // directly, but we expose it via the public API for completeness).
-        let _ = source_app; // used by caller when building NewEntry
         Ok(entry)
     }
 

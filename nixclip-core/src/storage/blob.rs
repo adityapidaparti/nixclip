@@ -45,7 +45,7 @@ impl BlobStore {
         fs::create_dir_all(self.base_dir.join(prefix))?;
 
         // Write to a temporary file, fsync, then atomically rename.
-        let tmp_name = format!("{}.tmp", uuid_v4_hex());
+        let tmp_name = format!("{}.tmp", temp_name_hex());
         let tmp_path = self.base_dir.join(".tmp").join(&tmp_name);
 
         let mut file = fs::File::create(&tmp_path)?;
@@ -163,11 +163,8 @@ fn hex_encode(bytes: &[u8]) -> String {
     s
 }
 
-/// Generate a random hex string suitable for temporary file names.
-///
-/// Uses a simple scheme based on hashing the current thread id and timestamp
-/// to avoid pulling in a full UUID crate.
-fn uuid_v4_hex() -> String {
+/// Generate a hex string suitable for temporary file names.
+fn temp_name_hex() -> String {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
     use std::time::SystemTime;

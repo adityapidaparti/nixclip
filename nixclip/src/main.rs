@@ -1,5 +1,3 @@
-//! NixClip — GTK4/libadwaita clipboard history popup.
-
 mod app;
 mod ipc_client;
 mod settings;
@@ -33,7 +31,6 @@ fn activation_token_from_env() -> Option<String> {
 }
 
 fn main() {
-    // Initialise tracing (logs to stderr).
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
