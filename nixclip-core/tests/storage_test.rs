@@ -422,6 +422,7 @@ fn prune_enforces_max_entries() {
         max_entries: 3,
         max_blob_size_mb: 500,
         retention: nixclip_core::config::Retention::Unlimited,
+        ephemeral_ttl_hours: 24,
     };
 
     let prune_stats = store.prune(&config).expect("prune");
@@ -443,6 +444,7 @@ fn prune_respects_unlimited_retention() {
         max_entries: 1000,
         max_blob_size_mb: 500,
         retention: nixclip_core::config::Retention::Unlimited,
+        ephemeral_ttl_hours: 24,
     };
 
     let prune_stats = store.prune(&config).expect("prune");

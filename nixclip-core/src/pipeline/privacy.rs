@@ -75,6 +75,50 @@ impl PrivacyFilter {
         })
     }
 
+    /// Phase-1 check: evaluates source-app and MIME-type rules only.
+    ///
+    /// This is intended to run **before** content processing so that obviously
+    /// rejected events avoid the cost of classification / hashing / thumbnailing.
+    /// Only app-name and MIME-type checks are performed here; content-pattern
+    /// checks require the preview text produced by the content processor and are
+    /// deferred to [`check_content_patterns`].
+    pub fn check_pre_content(
+        &self,
+        source_app: Option<&str>,
+        mimes: &[String],
+    ) -> FilterResult {
+        // 1. Check source application.
+        if let Some(app) = source_app {
+            if self.should_ignore_app(app) {
+                debug!(app, "clipboard rejected: ignored application");
+                return FilterResult::Reject;
+            }
+        }
+
+        // 2. Check for sensitive MIME hints.
+        if self.respect_sensitive_hints && self.has_sensitive_mimes(mimes) {
+            debug!("clipboard rejected: sensitive MIME hint detected");
+            return FilterResult::Reject;
+        }
+
+        FilterResult::Allow
+    }
+
+    /// Phase-2 check: evaluates content-based regex patterns against the
+    /// preview text produced by the content processor.
+    ///
+    /// Returns [`FilterResult::Ephemeral`] if any pattern matches, otherwise
+    /// [`FilterResult::Allow`].
+    pub fn check_content_patterns(&self, preview_text: Option<&str>) -> FilterResult {
+        if let Some(text) = preview_text {
+            if self.matches_sensitive_pattern(text) {
+                debug!("clipboard marked ephemeral: matched sensitive pattern");
+                return FilterResult::Ephemeral;
+            }
+        }
+        FilterResult::Allow
+    }
+
     /// Evaluate a clipboard event and return the appropriate [`FilterResult`].
     ///
     /// Checks are performed in this order:
@@ -367,5 +411,86 @@ mod tests {
             Some("super secret"),
         );
         assert_eq!(result, FilterResult::Reject);
+    }
+
+    // --- check_pre_content (phase 1) ---
+
+    #[test]
+    fn pre_content_allows_normal_event() {
+        let f = default_filter();
+        let result = f.check_pre_content(
+            Some("org.mozilla.firefox"),
+            &mimes(&["text/plain"]),
+        );
+        assert_eq!(result, FilterResult::Allow);
+    }
+
+    #[test]
+    fn pre_content_rejects_ignored_app() {
+        let f = filter_with_apps(vec!["keepassxc"]);
+        let result = f.check_pre_content(
+            Some("org.keepassxc.KeePassXC"),
+            &mimes(&["text/plain"]),
+        );
+        assert_eq!(result, FilterResult::Reject);
+    }
+
+    #[test]
+    fn pre_content_rejects_sensitive_mime() {
+        let f = default_filter();
+        let result = f.check_pre_content(
+            None,
+            &mimes(&["text/plain", "x-kde-passwordManagerHint"]),
+        );
+        assert_eq!(result, FilterResult::Reject);
+    }
+
+    #[test]
+    fn pre_content_does_not_check_patterns() {
+        // Even with patterns configured, pre_content should not evaluate them.
+        let f = filter_with_patterns(vec![r"^sk-[a-zA-Z0-9]{48}"]);
+        let result = f.check_pre_content(
+            Some("org.mozilla.firefox"),
+            &mimes(&["text/plain"]),
+        );
+        // Should allow — pattern matching is deferred to phase 2.
+        assert_eq!(result, FilterResult::Allow);
+    }
+
+    // --- check_content_patterns (phase 2) ---
+
+    #[test]
+    fn content_patterns_allows_normal_text() {
+        let f = filter_with_patterns(vec![r"^sk-[a-zA-Z0-9]{48}"]);
+        let result = f.check_content_patterns(Some("hello world"));
+        assert_eq!(result, FilterResult::Allow);
+    }
+
+    #[test]
+    fn content_patterns_marks_ephemeral_on_match() {
+        let f = filter_with_patterns(vec![r"^ghp_[a-zA-Z0-9]{36}"]);
+        let token = format!("ghp_{}", "B".repeat(36));
+        let result = f.check_content_patterns(Some(&token));
+        assert_eq!(result, FilterResult::Ephemeral);
+    }
+
+    #[test]
+    fn content_patterns_allows_when_no_preview() {
+        let f = filter_with_patterns(vec![r"^sk-[a-zA-Z0-9]{48}"]);
+        let result = f.check_content_patterns(None);
+        assert_eq!(result, FilterResult::Allow);
+    }
+
+    #[test]
+    fn content_patterns_allows_when_no_patterns_configured() {
+        let config = IgnoreConfig {
+            apps: vec![],
+            patterns: vec![],
+            respect_sensitive_hints: true,
+        };
+        let _f = PrivacyFilter::new(&config).unwrap();
+        let key = format!("sk-{}", "A".repeat(48));
+        let result = f.check_content_patterns(Some(&key));
+        assert_eq!(result, FilterResult::Allow);
     }
 }

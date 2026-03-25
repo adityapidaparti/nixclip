@@ -12,6 +12,7 @@ use tracing::{debug, error, info, warn};
 
 use nixclip_core::error::{NixClipError, Result};
 use nixclip_core::pipeline::ContentProcessor;
+use nixclip_core::pipeline::privacy::FilterResult;
 use nixclip_core::{MimePayload, NewEntry, Representation};
 
 use crate::AppState;
@@ -198,6 +199,11 @@ pub async fn run(state: Arc<AppState>) -> Result<()> {
 }
 
 /// Process a single clipboard event.
+///
+/// Privacy filtering is split into two phases so that content-based regex
+/// patterns (e.g. API-key detection) run *after* the content processor has
+/// produced the preview text, while cheaper app-name / MIME-type checks
+/// still short-circuit before the expensive processing step.
 async fn handle_event(state: &AppState, event: ClipboardEvent) -> Result<()> {
     // Skip if screen is locked.
     if state.is_locked.load(Ordering::Relaxed) {
@@ -205,13 +211,19 @@ async fn handle_event(state: &AppState, event: ClipboardEvent) -> Result<()> {
         return Ok(());
     }
 
-    // Run privacy filter.
+    // Phase 1: pre-content privacy check (app-name + MIME-type rules).
+    // This avoids the cost of content processing for events that would be
+    // rejected based on their source alone.
     {
         let filter = state.privacy_filter.read().await;
-        if filter.should_ignore(&event.offered_mimes, event.source_app.as_deref()) {
+        let pre_result = filter.check_pre_content(
+            event.source_app.as_deref(),
+            &event.offered_mimes,
+        );
+        if pre_result == FilterResult::Reject {
             debug!(
                 source_app = ?event.source_app,
-                "privacy filter rejected clipboard event"
+                "privacy filter rejected clipboard event (pre-content)"
             );
             return Ok(());
         }
@@ -220,6 +232,15 @@ async fn handle_event(state: &AppState, event: ClipboardEvent) -> Result<()> {
     // Process content (classification, hashing, thumbnails, etc.).
     let processed = ContentProcessor::process(event.payloads, event.source_app.clone())?;
 
+    // Phase 2: content-based privacy check (regex patterns on preview text).
+    // Patterns like API-key detectors need the preview text that the content
+    // processor just produced.
+    let ephemeral = {
+        let filter = state.privacy_filter.read().await;
+        filter.check_content_patterns(processed.preview_text.as_deref())
+            == FilterResult::Ephemeral
+    };
+
     // Build the NewEntry.
     let new_entry = NewEntry {
         content_class: processed.content_class,
@@ -227,7 +248,7 @@ async fn handle_event(state: &AppState, event: ClipboardEvent) -> Result<()> {
         canonical_hash: processed.canonical_hash,
         representations: processed.representations.clone(),
         source_app: event.source_app,
-        ephemeral: false,
+        ephemeral,
     };
 
     // Insert into the store (via spawn_blocking since rusqlite is !Send-safe
