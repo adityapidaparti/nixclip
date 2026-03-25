@@ -3,7 +3,7 @@
 /// Each test creates an isolated SQLite database and blob directory via
 /// `tempfile::tempdir()` so tests can run in parallel without interference.
 use nixclip_core::storage::ClipStore;
-use nixclip_core::{ContentClass, MimePayload, NewEntry, Query};
+use nixclip_core::{ContentClass, EntryMetadata, MimePayload, NewEntry, Query};
 use nixclip_core::config::GeneralConfig;
 
 // ---------------------------------------------------------------------------
@@ -24,6 +24,7 @@ fn make_entry(seed: u8, class: ContentClass, preview: &str) -> NewEntry {
         }],
         source_app: None,
         ephemeral: false,
+        metadata: EntryMetadata::default(),
     }
 }
 
@@ -176,6 +177,7 @@ fn dedup_same_hash_returns_none() {
         }],
         source_app: None,
         ephemeral: false,
+        metadata: EntryMetadata::default(),
     };
     let entry2 = entry1.clone();
 
@@ -228,6 +230,7 @@ fn large_payload_goes_to_blob_store() {
         }],
         source_app: None,
         ephemeral: false,
+        metadata: EntryMetadata::default(),
     };
 
     store.insert(entry).expect("insert large entry");
@@ -265,6 +268,7 @@ fn small_payload_stored_inline() {
         }],
         source_app: None,
         ephemeral: false,
+        metadata: EntryMetadata::default(),
     };
 
     store.insert(entry).expect("insert small entry");
@@ -497,6 +501,7 @@ fn get_representations_returns_stored_data() {
         }],
         source_app: None,
         ephemeral: false,
+        metadata: EntryMetadata::default(),
     };
 
     let id = store.insert(entry).expect("insert").unwrap();

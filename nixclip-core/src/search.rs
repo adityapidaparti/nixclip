@@ -4,7 +4,7 @@
 use rusqlite::{Connection, OpenFlags};
 use tracing::{debug, warn};
 
-use crate::{ContentClass, EntrySummary, QueryResult};
+use crate::{ContentClass, EntryMetadata, EntrySummary, QueryResult};
 use crate::error::Result;
 
 // ---------------------------------------------------------------------------
@@ -175,6 +175,7 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<EntrySummary> {
         source_app: row.get(7)?,
         // thumbnail is not stored in the entries table; set to None.
         thumbnail: None,
+        metadata: EntryMetadata::default(),
     })
 }
 

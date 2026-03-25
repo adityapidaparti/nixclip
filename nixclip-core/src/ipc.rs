@@ -63,6 +63,9 @@ pub enum ClientMessage {
 
     /// Apply a partial TOML patch to the daemon's configuration.
     SetConfig { version: u32, patch: toml::Value },
+
+    /// Fetch a single entry by ID.
+    GetEntry { version: u32, id: EntryId },
 }
 
 impl ClientMessage {
@@ -117,6 +120,11 @@ impl ClientMessage {
         Self::SetConfig { version: PROTOCOL_VERSION, patch }
     }
 
+    /// Construct a versioned `GetEntry` message.
+    pub fn get_entry(id: EntryId) -> Self {
+        Self::GetEntry { version: PROTOCOL_VERSION, id }
+    }
+
     /// Return the `version` field regardless of the variant.
     pub fn version(&self) -> u32 {
         match self {
@@ -127,7 +135,8 @@ impl ClientMessage {
             | Self::Restore { version, .. }
             | Self::Delete { version, .. }
             | Self::Pin { version, .. }
-            | Self::SetConfig { version, .. } => *version,
+            | Self::SetConfig { version, .. }
+            | Self::GetEntry { version, .. } => *version,
         }
     }
 }
@@ -159,6 +168,12 @@ pub enum ServerMessage {
 
     /// Response to a `GetConfig` or `SetConfig` request.
     ConfigValue { version: u32, config: Config },
+
+    /// Response to a `GetEntry` request.
+    EntryDetail {
+        version: u32,
+        entry: Option<EntrySummary>,
+    },
 
     /// Generic error response.
     Error { version: u32, message: String },
@@ -201,6 +216,11 @@ impl ServerMessage {
         Self::ConfigValue { version: PROTOCOL_VERSION, config }
     }
 
+    /// Construct a versioned `EntryDetail` message.
+    pub fn entry_detail(entry: Option<EntrySummary>) -> Self {
+        Self::EntryDetail { version: PROTOCOL_VERSION, entry }
+    }
+
     /// Construct a versioned `Error` message.
     pub fn error(message: impl Into<String>) -> Self {
         Self::Error { version: PROTOCOL_VERSION, message: message.into() }
@@ -217,6 +237,7 @@ impl ServerMessage {
             Self::NewEntry { version, .. }
             | Self::QueryResult { version, .. }
             | Self::RestoreResult { version, .. }
+            | Self::EntryDetail { version, .. }
             | Self::ConfigValue { version, .. }
             | Self::Error { version, .. }
             | Self::Ok { version } => *version,

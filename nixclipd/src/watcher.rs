@@ -228,6 +228,7 @@ async fn handle_event(state: &AppState, event: ClipboardEvent) -> Result<()> {
         representations: processed.representations.clone(),
         source_app: event.source_app,
         ephemeral: false,
+        metadata: processed.metadata,
     };
 
     // Insert into the store (via spawn_blocking since rusqlite is !Send-safe

@@ -99,6 +99,8 @@ pub struct NewEntry {
     pub representations: Vec<MimePayload>,
     pub source_app: Option<String>,
     pub ephemeral: bool,
+    #[serde(default)]
+    pub metadata: EntryMetadata,
 }
 
 // ---------------------------------------------------------------------------
@@ -118,6 +120,9 @@ pub struct EntrySummary {
     pub preview_text: Option<String>,
     pub source_app: Option<String>,
     pub thumbnail: Option<Vec<u8>>,
+    /// Optional metadata persisted from pipeline processing.
+    #[serde(default)]
+    pub metadata: EntryMetadata,
 }
 
 // ---------------------------------------------------------------------------
@@ -177,7 +182,7 @@ pub struct ProcessedEntry {
 // EntryMetadata
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct EntryMetadata {
     pub image_dimensions: Option<(u32, u32)>,
     pub file_count: Option<usize>,

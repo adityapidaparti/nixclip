@@ -182,6 +182,9 @@ async fn handle_client(state: Arc<AppState>, stream: UnixStream) -> Result<()> {
             ClientMessage::SetConfig { patch, .. } => {
                 handle_set_config(&state, patch).await
             }
+            ClientMessage::GetEntry { id, .. } => {
+                handle_get_entry(&state, id).await
+            }
         };
 
         send_message(&mut writer, &response).await?;
@@ -278,6 +281,35 @@ async fn handle_query(
     match result {
         Ok(qr) => ServerMessage::query_result(qr.entries, qr.total),
         Err(e) => ServerMessage::error(format!("query failed: {e}")),
+    }
+}
+
+/// Fetch a single entry by ID.
+async fn handle_get_entry(
+    state: &AppState,
+    id: nixclip_core::EntryId,
+) -> ServerMessage {
+    let result = {
+        let store = match state.store.lock() {
+            Ok(s) => s,
+            Err(e) => {
+                return ServerMessage::error(format!("store lock poisoned: {e}"));
+            }
+        };
+        store.get_entry(id)
+    };
+
+    match result {
+        Ok(entry) => ServerMessage::entry_detail(Some(entry)),
+        Err(e) => {
+            // QueryReturnedNoRows means the entry does not exist.
+            let msg = format!("{e}");
+            if msg.contains("Query returned no rows") {
+                ServerMessage::entry_detail(None)
+            } else {
+                ServerMessage::error(format!("get entry failed: {e}"))
+            }
+        }
     }
 }
 
