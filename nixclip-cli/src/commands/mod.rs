@@ -1,0 +1,10 @@
+pub mod clear;
+pub mod config_cmd;
+pub mod delete;
+pub mod doctor;
+pub mod list;
+pub mod paste;
+pub mod pin;
+pub mod search;
+pub mod show;
+pub mod stats;

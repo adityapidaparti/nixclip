@@ -1,0 +1,22 @@
+[package]
+name = "nixclipd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+nixclip-core = { path = "../nixclip-core" }
+tokio = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+rmp-serde = { workspace = true }
+chrono = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+zbus = "4"
+ashpd = "0.9"
+nix = { version = "0.29", features = ["socket", "user"] }

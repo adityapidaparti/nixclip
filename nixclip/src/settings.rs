@@ -1,0 +1,296 @@
+//! Settings window — AdwPreferencesWindow with General, Privacy, and About pages.
+
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use gtk4 as gtk;
+use gtk::prelude::*;
+use libadwaita as adw;
+use adw::prelude::*;
+
+use nixclip_core::config::{Config, Retention};
+
+/// Build the settings preferences window.
+///
+/// `on_changed` is called whenever the user modifies a setting, with the
+/// updated `Config`.
+pub fn build_settings_window(
+    app: &adw::Application,
+    config: Config,
+    on_changed: impl Fn(Config) + 'static + Clone,
+) -> adw::PreferencesWindow {
+    let window = adw::PreferencesWindow::new();
+    window.set_application(Some(app));
+    window.set_title(Some("NixClip Settings"));
+    window.set_default_size(500, 600);
+    window.set_search_enabled(true);
+
+    let state = Rc::new(RefCell::new(config));
+
+    window.add(&build_general_page(&state, on_changed.clone()));
+    window.add(&build_privacy_page(&state, on_changed.clone()));
+    window.add(&build_about_page(&state));
+
+    window
+}
+
+// ---------------------------------------------------------------------------
+// Page 1 — General
+// ---------------------------------------------------------------------------
+
+fn build_general_page(
+    state: &Rc<RefCell<Config>>,
+    on_changed: impl Fn(Config) + 'static + Clone,
+) -> adw::PreferencesPage {
+    let page = adw::PreferencesPage::new();
+    page.set_title("General");
+    page.set_icon_name(Some("preferences-other-symbolic"));
+
+    // --- History group -------------------------------------------------------
+    let group = adw::PreferencesGroup::new();
+    group.set_title("History");
+
+    // Retention combo
+    let retention_row = adw::ComboRow::new();
+    retention_row.set_title("Keep History For");
+    let labels = gtk::StringList::new(&[
+        "7 days",
+        "30 days",
+        "3 months",
+        "6 months",
+        "1 year",
+        "Unlimited",
+    ]);
+    retention_row.set_model(Some(&labels));
+    retention_row.set_selected(retention_to_index(&state.borrow().general.retention));
+    {
+        let s = state.clone();
+        let cb = on_changed.clone();
+        retention_row.connect_selected_notify(move |row| {
+            let retention = index_to_retention(row.selected());
+            s.borrow_mut().general.retention = retention;
+            cb(s.borrow().clone());
+        });
+    }
+    group.add(&retention_row);
+
+    // Max entries
+    let adj = gtk::Adjustment::new(
+        state.borrow().general.max_entries as f64,
+        100.0,
+        50_000.0,
+        100.0,
+        1000.0,
+        0.0,
+    );
+    let max_row = adw::SpinRow::new(Some(&adj), 100.0, 0);
+    max_row.set_title("Maximum Entries");
+    {
+        let s = state.clone();
+        let cb = on_changed.clone();
+        max_row.connect_value_notify(move |row| {
+            s.borrow_mut().general.max_entries = row.value() as u32;
+            cb(s.borrow().clone());
+        });
+    }
+    group.add(&max_row);
+
+    // Max blob size
+    let adj2 = gtk::Adjustment::new(
+        state.borrow().general.max_blob_size_mb as f64,
+        100.0,
+        10_000.0,
+        100.0,
+        500.0,
+        0.0,
+    );
+    let blob_row = adw::SpinRow::new(Some(&adj2), 100.0, 0);
+    blob_row.set_title("Maximum Storage (MB)");
+    {
+        let s = state.clone();
+        let cb = on_changed.clone();
+        blob_row.connect_value_notify(move |row| {
+            s.borrow_mut().general.max_blob_size_mb = row.value() as u32;
+            cb(s.borrow().clone());
+        });
+    }
+    group.add(&blob_row);
+
+    page.add(&group);
+
+    // --- Danger zone ---------------------------------------------------------
+    let danger = adw::PreferencesGroup::new();
+    danger.set_title("Danger Zone");
+
+    let clear_row = adw::ActionRow::new();
+    clear_row.set_title("Clear All History");
+    clear_row.set_subtitle("Pinned items will be preserved");
+
+    let clear_btn = gtk::Button::with_label("Clear");
+    clear_btn.add_css_class("destructive-action");
+    clear_btn.set_valign(gtk::Align::Center);
+    clear_row.add_suffix(&clear_btn);
+    clear_row.set_activatable_widget(Some(&clear_btn));
+
+    danger.add(&clear_row);
+    page.add(&danger);
+
+    page
+}
+
+// ---------------------------------------------------------------------------
+// Page 2 — Privacy
+// ---------------------------------------------------------------------------
+
+fn build_privacy_page(
+    state: &Rc<RefCell<Config>>,
+    on_changed: impl Fn(Config) + 'static + Clone,
+) -> adw::PreferencesPage {
+    let page = adw::PreferencesPage::new();
+    page.set_title("Privacy");
+    page.set_icon_name(Some("security-high-symbolic"));
+
+    // --- Ignored apps --------------------------------------------------------
+    let apps_group = adw::PreferencesGroup::new();
+    apps_group.set_title("Ignored Applications");
+    apps_group.set_description(Some(
+        "Clipboard content from these applications will never be stored.",
+    ));
+
+    for app_id in &state.borrow().ignore.apps {
+        let row = adw::ActionRow::new();
+        row.set_title(app_id);
+
+        let remove_btn = gtk::Button::from_icon_name("user-trash-symbolic");
+        remove_btn.set_valign(gtk::Align::Center);
+        remove_btn.add_css_class("flat");
+        row.add_suffix(&remove_btn);
+
+        apps_group.add(&row);
+    }
+
+    page.add(&apps_group);
+
+    // --- Ignored patterns ----------------------------------------------------
+    let pat_group = adw::PreferencesGroup::new();
+    pat_group.set_title("Ignored Patterns");
+    pat_group.set_description(Some(
+        "Content matching these regex patterns will be flagged as ephemeral\n\
+         and auto-deleted after first use.",
+    ));
+
+    for pattern in &state.borrow().ignore.patterns {
+        let row = adw::ActionRow::new();
+        row.set_title(pattern);
+
+        let remove_btn = gtk::Button::from_icon_name("user-trash-symbolic");
+        remove_btn.set_valign(gtk::Align::Center);
+        remove_btn.add_css_class("flat");
+        row.add_suffix(&remove_btn);
+
+        pat_group.add(&row);
+    }
+
+    page.add(&pat_group);
+
+    // --- Sensitive hints -----------------------------------------------------
+    let hints_group = adw::PreferencesGroup::new();
+    hints_group.set_title("Sensitive Content");
+
+    let hints_row = adw::SwitchRow::new();
+    hints_row.set_title("Respect Clipboard Sensitive Hints");
+    hints_row.set_subtitle("Automatically ignore content marked as sensitive by apps");
+    hints_row.set_active(state.borrow().ignore.respect_sensitive_hints);
+    {
+        let s = state.clone();
+        let cb = on_changed.clone();
+        hints_row.connect_active_notify(move |row| {
+            s.borrow_mut().ignore.respect_sensitive_hints = row.is_active();
+            cb(s.borrow().clone());
+        });
+    }
+    hints_group.add(&hints_row);
+
+    page.add(&hints_group);
+
+    page
+}
+
+// ---------------------------------------------------------------------------
+// Page 3 — About
+// ---------------------------------------------------------------------------
+
+fn build_about_page(state: &Rc<RefCell<Config>>) -> adw::PreferencesPage {
+    let page = adw::PreferencesPage::new();
+    page.set_title("About");
+    page.set_icon_name(Some("help-about-symbolic"));
+
+    let info_group = adw::PreferencesGroup::new();
+    info_group.set_title("About NixClip");
+
+    let version_row = adw::ActionRow::new();
+    version_row.set_title("Version");
+    version_row.set_subtitle(env!("CARGO_PKG_VERSION"));
+    info_group.add(&version_row);
+
+    let license_row = adw::ActionRow::new();
+    license_row.set_title("License");
+    license_row.set_subtitle("MIT");
+    info_group.add(&license_row);
+
+    page.add(&info_group);
+
+    // Shortcut info
+    let shortcut_group = adw::PreferencesGroup::new();
+    shortcut_group.set_title("Shortcuts");
+
+    let shortcut_row = adw::ActionRow::new();
+    shortcut_row.set_title("Global Shortcut");
+    shortcut_row.set_subtitle(&state.borrow().keybind.toggle);
+    shortcut_group.add(&shortcut_row);
+
+    let configure_row = adw::ActionRow::new();
+    configure_row.set_title("Configure Shortcut");
+    configure_row.set_subtitle("Open GNOME Settings → Keyboard → Shortcuts");
+    configure_row.set_activatable(true);
+    configure_row.connect_activated(|_| {
+        // Try to open GNOME Settings keyboard shortcuts page.
+        if let Err(e) = std::process::Command::new("gnome-control-center")
+            .arg("keyboard")
+            .spawn()
+        {
+            tracing::warn!(error = %e, "could not open GNOME Settings");
+        }
+    });
+    shortcut_group.add(&configure_row);
+
+    page.add(&shortcut_group);
+
+    page
+}
+
+// ---------------------------------------------------------------------------
+// Retention ↔ ComboRow index helpers
+// ---------------------------------------------------------------------------
+
+fn retention_to_index(r: &Retention) -> u32 {
+    match r {
+        Retention::Days7 => 0,
+        Retention::Days30 => 1,
+        Retention::Months3 => 2,
+        Retention::Months6 => 3,
+        Retention::Year1 => 4,
+        Retention::Unlimited => 5,
+    }
+}
+
+fn index_to_retention(idx: u32) -> Retention {
+    match idx {
+        0 => Retention::Days7,
+        1 => Retention::Days30,
+        2 => Retention::Months3,
+        3 => Retention::Months6,
+        4 => Retention::Year1,
+        _ => Retention::Unlimited,
+    }
+}

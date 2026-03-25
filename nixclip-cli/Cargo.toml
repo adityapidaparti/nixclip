@@ -1,0 +1,16 @@
+[package]
+name = "nixclip-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+nixclip-core = { path = "../nixclip-core" }
+tokio = { workspace = true }
+tracing = { workspace = true }
+serde_json = { workspace = true }
+rmp-serde = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+clap = { version = "4", features = ["derive"] }
+serde = { workspace = true }
+toml = "0.8"

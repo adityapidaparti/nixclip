@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=NixClip
+Comment=Clipboard History Manager for GNOME
+Exec=nixclip
+Icon=edit-paste-symbolic
+Categories=Utility;GTK;
+Keywords=clipboard;paste;history;copy;
+StartupNotify=true
+StartupWMClass=com.nixclip.NixClip
+X-GNOME-UsesNotifications=false
