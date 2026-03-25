@@ -18,5 +18,6 @@ wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 zbus = "4"
+futures-util = "0.3"
 ashpd = "0.9"
 nix = { version = "0.29", features = ["socket", "user"] }

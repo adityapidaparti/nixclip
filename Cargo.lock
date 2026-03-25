@@ -1530,6 +1530,7 @@ version = "0.1.0"
 dependencies = [
  "ashpd",
  "chrono",
+ "futures-util",
  "nix",
  "nixclip-core",
  "rmp-serde",
