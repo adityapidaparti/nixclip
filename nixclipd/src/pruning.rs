@@ -24,7 +24,7 @@ pub async fn run(state: Arc<AppState>) -> Result<()> {
     loop {
         interval.tick().await;
 
-        match run_once(&state) {
+        match run_once(&state).await {
             Ok(stats) => {
                 if stats.entries_deleted > 0 || stats.blobs_deleted > 0 {
                     info!(
@@ -47,8 +47,8 @@ pub async fn run(state: Arc<AppState>) -> Result<()> {
 /// This performs both the standard retention/max-entries pruning **and**
 /// ephemeral-entry cleanup (entries flagged as ephemeral that have exceeded
 /// their TTL).
-pub fn run_once(state: &AppState) -> Result<PruneStats> {
-    let config = state.config.blocking_read();
+pub async fn run_once(state: &AppState) -> Result<PruneStats> {
+    let config = state.config.read().await;
     let general = config.general.clone();
     drop(config);
 

@@ -240,29 +240,20 @@ impl PopupWindow {
                 }
 
                 gdk::Key::BackSpace if ctrl => {
-                    let _ = gtk::prelude::WidgetExt::activate_action(
-                        &window,
-                        "win.delete-entry",
-                        None,
-                    );
+                    let _ =
+                        gtk::prelude::WidgetExt::activate_action(&window, "win.delete-entry", None);
                     glib::Propagation::Stop
                 }
 
                 gdk::Key::p | gdk::Key::P if ctrl => {
-                    let _ = gtk::prelude::WidgetExt::activate_action(
-                        &window,
-                        "win.toggle-pin",
-                        None,
-                    );
+                    let _ =
+                        gtk::prelude::WidgetExt::activate_action(&window, "win.toggle-pin", None);
                     glib::Propagation::Stop
                 }
 
                 gdk::Key::Delete if ctrl && shift => {
-                    let _ = gtk::prelude::WidgetExt::activate_action(
-                        &window,
-                        "win.clear-all",
-                        None,
-                    );
+                    let _ =
+                        gtk::prelude::WidgetExt::activate_action(&window, "win.clear-all", None);
                     glib::Propagation::Stop
                 }
 

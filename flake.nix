@@ -24,6 +24,7 @@
           nativeBuildInputs = with pkgs; [
             pkg-config
             wrapGAppsHook4
+            makeWrapper
           ];
 
           buildInputs = with pkgs; [
@@ -48,6 +49,16 @@
             # pkg-config is still needed for the libraries above.
           ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
             darwin.apple_sdk.frameworks.SystemConfiguration
+          ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+            wl-clipboard
+            wayland-utils
+          ];
+
+          makeWrapperArgs = pkgs.lib.optionals pkgs.stdenv.isLinux [
+            "--prefix"
+            "PATH"
+            ":"
+            (pkgs.lib.makeBinPath [ pkgs.wl-clipboard pkgs.wayland-utils ])
           ];
         };
 

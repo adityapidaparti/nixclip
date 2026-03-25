@@ -25,7 +25,9 @@ use crate::AppState;
 const SHORTCUT_ID: &str = "toggle";
 #[cfg(target_os = "linux")]
 const SHORTCUT_DESCRIPTION: &str = "Toggle NixClip clipboard history";
-const RETRY_DELAY: Duration = Duration::from_secs(15);
+const FAST_RETRY_DELAY: Duration = Duration::from_secs(15);
+const SLOW_RETRY_DELAY: Duration = Duration::from_secs(300);
+const FAST_RETRY_LIMIT: u32 = 10;
 
 /// Run the global shortcut listener.
 ///
@@ -33,23 +35,47 @@ const RETRY_DELAY: Duration = Duration::from_secs(15);
 /// portal. If the portal is unavailable, this keeps retrying in the
 /// background instead of terminating the daemon.
 pub async fn run(state: Arc<AppState>) -> Result<()> {
+    let mut consecutive_failures = 0_u32;
+
     loop {
         let trigger = state.config.read().await.keybind.toggle.clone();
         info!(trigger = %trigger, "starting GlobalShortcuts portal listener");
 
-        match register_and_listen(&trigger).await {
+        let retry_delay = match register_and_listen(&trigger).await {
             Ok(()) => {
-                warn!("global shortcut listener exited; retrying after backoff");
+                if consecutive_failures > 0 {
+                    info!(consecutive_failures, "global shortcut listener recovered");
+                }
+                consecutive_failures = 0;
+                warn!(
+                    retry_delay_secs = FAST_RETRY_DELAY.as_secs(),
+                    "global shortcut listener exited; retrying after backoff"
+                );
+                FAST_RETRY_DELAY
             }
             Err(error) => {
+                consecutive_failures = consecutive_failures.saturating_add(1);
+                let retry_delay = retry_delay_for(consecutive_failures);
                 warn!(
                     error = %error,
+                    error_debug = ?error,
+                    error_chain = %format_error_chain(error.as_ref()),
+                    error_type = %error_type_name(error.as_ref()),
+                    consecutive_failures,
+                    retry_delay_secs = retry_delay.as_secs(),
                     "global shortcut registration failed; retrying after backoff"
                 );
+                if consecutive_failures == FAST_RETRY_LIMIT {
+                    warn!(
+                        retry_delay_secs = retry_delay.as_secs(),
+                        "global shortcut registration hit fast-retry limit; slowing retry cadence"
+                    );
+                }
+                retry_delay
             }
-        }
+        };
 
-        tokio::time::sleep(RETRY_DELAY).await;
+        tokio::time::sleep(retry_delay).await;
     }
 }
 
@@ -110,7 +136,7 @@ async fn register_and_listen(
             tokio::select! {
                 Some(_details) = session_closed.next() => {
                     warn!("GlobalShortcuts session closed");
-                    break;
+                    return Ok(());
                 }
                 Some(event) = activated.next() => {
                     if event.shortcut_id() != SHORTCUT_ID {
@@ -122,11 +148,12 @@ async fn register_and_listen(
                         warn!(error = %error, "failed to spawn nixclip-ui");
                     }
                 }
-                else => break,
+                else => {
+                    warn!("GlobalShortcuts event stream ended");
+                    return Ok(());
+                }
             }
         }
-
-        Err("GlobalShortcuts stream ended".into())
     }
 }
 
@@ -142,6 +169,53 @@ fn activation_token(
                 .and_then(|value| String::try_from(value).ok())
         })
     })
+}
+
+fn retry_delay_for(consecutive_failures: u32) -> Duration {
+    if consecutive_failures >= FAST_RETRY_LIMIT {
+        SLOW_RETRY_DELAY
+    } else {
+        FAST_RETRY_DELAY
+    }
+}
+
+fn error_type_name(error: &(dyn std::error::Error + 'static)) -> &'static str {
+    if let Some(error) = error.downcast_ref::<ashpd::Error>() {
+        match error {
+            ashpd::Error::Response(_) => "ashpd::Error::Response",
+            ashpd::Error::Portal(_) => "ashpd::Error::Portal",
+            ashpd::Error::Zbus(_) => "ashpd::Error::Zbus",
+            ashpd::Error::NoResponse => "ashpd::Error::NoResponse",
+            ashpd::Error::ParseError(_) => "ashpd::Error::ParseError",
+            ashpd::Error::IO(_) => "ashpd::Error::IO",
+            ashpd::Error::InvalidAppID => "ashpd::Error::InvalidAppID",
+            ashpd::Error::NulTerminated(_) => "ashpd::Error::NulTerminated",
+            ashpd::Error::RequiresVersion(_, _) => "ashpd::Error::RequiresVersion",
+            ashpd::Error::PortalNotFound(_) => "ashpd::Error::PortalNotFound",
+            ashpd::Error::UnexpectedIcon => "ashpd::Error::UnexpectedIcon",
+            _ => "ashpd::Error",
+        }
+    } else if error.is::<zbus::Error>() {
+        "zbus::Error"
+    } else if error.is::<zbus::fdo::Error>() {
+        "zbus::fdo::Error"
+    } else if error.is::<std::io::Error>() {
+        "std::io::Error"
+    } else {
+        "unknown"
+    }
+}
+
+fn format_error_chain(mut error: &(dyn std::error::Error + 'static)) -> String {
+    let mut chain = error.to_string();
+
+    while let Some(source) = error.source() {
+        chain.push_str(": ");
+        chain.push_str(&source.to_string());
+        error = source;
+    }
+
+    chain
 }
 
 #[cfg(target_os = "linux")]
@@ -191,7 +265,9 @@ mod tests {
 
     use zbus::zvariant::{OwnedValue, Str};
 
-    use super::activation_token;
+    use super::{
+        activation_token, retry_delay_for, FAST_RETRY_DELAY, FAST_RETRY_LIMIT, SLOW_RETRY_DELAY,
+    };
 
     #[test]
     fn extracts_activation_token_from_options() {
@@ -208,5 +284,15 @@ mod tests {
     fn ignores_missing_activation_token() {
         let options = HashMap::new();
         assert!(activation_token(&options).is_none());
+    }
+
+    #[test]
+    fn uses_fast_retry_before_limit() {
+        assert_eq!(retry_delay_for(FAST_RETRY_LIMIT - 1), FAST_RETRY_DELAY);
+    }
+
+    #[test]
+    fn uses_slow_retry_at_limit() {
+        assert_eq!(retry_delay_for(FAST_RETRY_LIMIT), SLOW_RETRY_DELAY);
     }
 }
