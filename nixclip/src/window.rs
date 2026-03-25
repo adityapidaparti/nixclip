@@ -6,12 +6,14 @@ use gtk4::gdk;
 use gtk4::glib;
 use libadwaita as adw;
 
+use std::collections::HashMap;
+
 use nixclip_core::config::Config;
 use nixclip_core::{ContentClass, EntrySummary};
 
 use crate::widgets::entry_row::EntryRow;
 use crate::widgets::filter_tabs::FilterTabs;
-use crate::widgets::footer::build_footer;
+use crate::widgets::footer::Footer;
 use crate::widgets::search_bar::SearchBar;
 
 use std::cell::RefCell;
@@ -42,6 +44,7 @@ pub struct PopupWindow {
     scrolled: gtk::ScrolledWindow,
     empty_label: gtk::Label,
     spinner: gtk::Spinner,
+    footer: Footer,
     /// The entry rows currently displayed, kept so we can retrieve selection data.
     rows: Rc<RefCell<Vec<EntryRow>>>,
 }
@@ -123,8 +126,8 @@ impl PopupWindow {
         inner_box.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
 
         // Footer.
-        let footer = build_footer();
-        inner_box.append(&footer);
+        let footer = Footer::new();
+        inner_box.append(&footer.container);
 
         clamp.set_child(Some(&inner_box));
         outer_box.append(&clamp);
@@ -144,6 +147,7 @@ impl PopupWindow {
             scrolled,
             empty_label,
             spinner,
+            footer,
             rows,
         };
 
@@ -231,6 +235,21 @@ impl PopupWindow {
     /// Access the filter tabs for wiring external callbacks.
     pub fn filter_tabs(&self) -> &FilterTabs {
         &self.filter_tabs
+    }
+
+    /// Update the "Showing N of M" result count in the footer.
+    pub fn update_result_count(&self, shown: usize, total: u32) {
+        self.footer.set_result_count(shown, total);
+    }
+
+    /// Hide the result count in the footer.
+    pub fn clear_result_count(&self) {
+        self.footer.clear_result_count();
+    }
+
+    /// Show or hide filter tab buttons based on which content classes have entries.
+    pub fn update_visible_tabs(&self, counts: &HashMap<ContentClass, u32>) {
+        self.filter_tabs.update_visible_tabs(counts);
     }
 
     // -----------------------------------------------------------------------

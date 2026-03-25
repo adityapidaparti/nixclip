@@ -64,12 +64,15 @@ impl UiIpcClient {
     // -----------------------------------------------------------------------
 
     /// Query clipboard history.
+    ///
+    /// The callback receives `(entries, total)` where `total` is the full
+    /// count of matching entries (which may exceed the returned page).
     pub fn query(
         &self,
         text: Option<String>,
         class: Option<ContentClass>,
         limit: u32,
-        callback: impl Fn(Result<Vec<nixclip_core::EntrySummary>, String>) + 'static,
+        callback: impl Fn(Result<(Vec<nixclip_core::EntrySummary>, u32), String>) + 'static,
     ) {
         let msg = ClientMessage::query(
             text,
@@ -79,7 +82,9 @@ impl UiIpcClient {
         );
 
         self.send(msg, move |res| match res {
-            Ok(ServerMessage::QueryResult { entries, .. }) => callback(Ok(entries)),
+            Ok(ServerMessage::QueryResult { entries, total, .. }) => {
+                callback(Ok((entries, total)))
+            }
             Ok(ServerMessage::Error { message, .. }) => callback(Err(message)),
             Ok(other) => callback(Err(format!("unexpected response: {other:?}"))),
             Err(e) => callback(Err(e)),
