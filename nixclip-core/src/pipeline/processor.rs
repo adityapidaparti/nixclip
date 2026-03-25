@@ -186,7 +186,7 @@ impl ContentProcessor {
         })
     }
 
-    /// Decode the image, generate a 64×64 PNG thumbnail, and record dimensions.
+    /// Decode the image, generate a 120×120 PNG thumbnail, and record dimensions.
     ///
     /// If decoding fails, the error is logged and processing continues without
     /// a thumbnail. The raw bytes are always stored.
@@ -229,7 +229,8 @@ impl ContentProcessor {
         })
     }
 
-    /// Decode image bytes and produce a 64×64 PNG thumbnail.
+    /// Decode image bytes and produce a 120x120 PNG thumbnail (aspect-ratio
+    /// preserving).
     ///
     /// Separated so that the caller can catch errors without panicking.
     fn decode_and_thumbnail(
@@ -246,16 +247,23 @@ impl ContentProcessor {
 
         let (width, height) = (img.width(), img.height());
 
-        let thumbnail = image::imageops::resize(&img, 64, 64, FilterType::Lanczos3);
+        // Generate a thumbnail that fits within 120x120 while preserving the
+        // original aspect ratio.  `DynamicImage::resize` (unlike
+        // `imageops::resize`) respects the aspect ratio automatically.
+        let thumbnail = img.resize(120, 120, FilterType::Lanczos3);
+        // Convert to Rgba8 to guarantee a consistent pixel format for PNG encoding.
+        let rgba = thumbnail.to_rgba8();
+        let thumb_w = rgba.width();
+        let thumb_h = rgba.height();
 
         // Encode thumbnail as PNG into a Vec<u8>.
         let mut png_bytes: Vec<u8> = Vec::new();
         let encoder = PngEncoder::new(Cursor::new(&mut png_bytes));
         encoder
             .write_image(
-                thumbnail.as_raw(),
-                64,
-                64,
+                rgba.as_raw(),
+                thumb_w,
+                thumb_h,
                 image::ExtendedColorType::Rgba8,
             )
             .map_err(|e| NixClipError::Image(format!("failed to encode thumbnail: {e}")))?;

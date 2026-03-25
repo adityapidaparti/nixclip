@@ -3,6 +3,7 @@
 //! Handles window creation, IPC connection, and wiring keyboard-shortcut
 //! actions to the daemon.
 
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use gtk4 as gtk;
@@ -248,18 +249,33 @@ fn load_entries(
     class: Option<ContentClass>,
 ) {
     let p = popup.clone();
+    let update_tabs = class.is_none();
     ipc.query(query, class, 50, move |result| {
         match result {
-            Ok(entries) => {
+            Ok((entries, total)) => {
                 if entries.is_empty() {
                     p.show_empty_state(
                         "No clipboard history yet.\nCopy something to get started.",
                     );
+                    p.clear_result_count();
                 } else {
+                    // When loading the unfiltered view, update which filter
+                    // tabs are visible based on the content classes present.
+                    if update_tabs {
+                        let mut counts: HashMap<ContentClass, u32> = HashMap::new();
+                        for e in &entries {
+                            *counts.entry(e.content_class).or_insert(0) += 1;
+                        }
+                        p.update_visible_tabs(&counts);
+                    }
+
+                    let shown = entries.len();
                     p.populate(entries);
+                    p.update_result_count(shown, total);
                 }
             }
             Err(e) => {
+                p.clear_result_count();
                 p.show_error_state(&format!(
                     "Cannot connect to nixclipd.\n\
                      Is the daemon running?\n\n\

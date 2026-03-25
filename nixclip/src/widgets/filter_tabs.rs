@@ -3,6 +3,7 @@ use gtk::prelude::*;
 use nixclip_core::ContentClass;
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 /// A row of toggle buttons for filtering entries by content class.
@@ -80,6 +81,36 @@ impl FilterTabs {
         wire_button(&self.btn_images, Some(ContentClass::Image));
         wire_button(&self.btn_files, Some(ContentClass::Files));
         wire_button(&self.btn_links, Some(ContentClass::Url));
+    }
+
+    /// Show or hide filter tab buttons based on which content classes have
+    /// entries.  The "All" tab is always visible.  If the currently active
+    /// filter becomes hidden, automatically switch back to "All".
+    pub fn update_visible_tabs(&self, counts: &HashMap<ContentClass, u32>) {
+        let has_text = counts.get(&ContentClass::Text).copied().unwrap_or(0)
+            + counts.get(&ContentClass::RichText).copied().unwrap_or(0);
+        let has_images = counts.get(&ContentClass::Image).copied().unwrap_or(0);
+        let has_files = counts.get(&ContentClass::Files).copied().unwrap_or(0);
+        let has_links = counts.get(&ContentClass::Url).copied().unwrap_or(0);
+
+        self.btn_text.set_visible(has_text > 0);
+        self.btn_images.set_visible(has_images > 0);
+        self.btn_files.set_visible(has_files > 0);
+        self.btn_links.set_visible(has_links > 0);
+
+        // If the currently active filter tab has been hidden, revert to "All".
+        let active = *self.active_filter.borrow();
+        let active_hidden = match active {
+            None => false, // "All" is always visible
+            Some(ContentClass::Text) | Some(ContentClass::RichText) => has_text == 0,
+            Some(ContentClass::Image) => has_images == 0,
+            Some(ContentClass::Files) => has_files == 0,
+            Some(ContentClass::Url) => has_links == 0,
+        };
+        if active_hidden {
+            self.btn_all.set_active(true);
+            *self.active_filter.borrow_mut() = None;
+        }
     }
 
     /// Programmatically select a filter tab.

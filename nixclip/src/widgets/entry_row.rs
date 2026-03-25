@@ -134,7 +134,7 @@ fn build_thumbnail(data: &[u8]) -> Option<gtk::Picture> {
     picture.set_content_fit(gtk::ContentFit::Contain);
     picture.set_can_shrink(true);
     // Constrain to a reasonable size.
-    picture.set_size_request(64, 48);
+    picture.set_size_request(120, 90);
     picture.set_halign(gtk::Align::Start);
     Some(picture)
 }
