@@ -5,12 +5,12 @@
 
 use std::rc::Rc;
 
+use adw::prelude::*;
+use gtk::prelude::*;
 use gtk4 as gtk;
 use gtk4::gio;
 use gtk4::glib;
-use gtk::prelude::*;
 use libadwaita as adw;
-use adw::prelude::*;
 
 use nixclip_core::config::Config;
 use nixclip_core::{ContentClass, RestoreMode};
@@ -29,7 +29,7 @@ pub fn activate(app: &adw::Application) {
     let socket_path = Config::socket_path();
 
     let ipc = Rc::new(UiIpcClient::new(&socket_path));
-    let popup = Rc::new(PopupWindow::new(app));
+    let popup = Rc::new(PopupWindow::new(app, &config));
 
     setup_actions(&popup, &ipc);
     setup_search(&popup, &ipc);
@@ -164,43 +164,33 @@ fn setup_actions(popup: &Rc<PopupWindow>, ipc: &Rc<UiIpcClient>) {
             let adw_app: adw::Application = app.downcast().expect("not an adw::Application");
             let config = Config::load_or_default();
 
-            let settings_win = crate::settings::build_settings_window(
-                &adw_app,
-                config,
-                |_new_config| {
+            let settings_win =
+                crate::settings::build_settings_window(&adw_app, config, |_new_config| {
                     // In a full implementation, send SetConfig IPC to the daemon.
                     tracing::info!("settings updated");
-                },
-            );
+                });
             settings_win.set_transient_for(Some(&p.window));
             settings_win.present();
         }
     });
 
     // --- filter (parameterised: i32 index) ----------------------------------
-    add_action(
-        win,
-        "filter",
-        Some(&i32::static_variant_type()),
-        {
-            let p = popup.clone();
-            let i = ipc.clone();
-            move |_, param| {
-                let idx = param
-                    .and_then(|v| v.get::<i32>())
-                    .unwrap_or(0);
-                let class = match idx {
-                    1 => Some(ContentClass::Text),
-                    2 => Some(ContentClass::Image),
-                    3 => Some(ContentClass::Files),
-                    4 => Some(ContentClass::Url),
-                    _ => None, // 0 or unknown = All
-                };
-                p.set_filter(class);
-                load_entries(&p, &i, None, class);
-            }
-        },
-    );
+    add_action(win, "filter", Some(&i32::static_variant_type()), {
+        let p = popup.clone();
+        let i = ipc.clone();
+        move |_, param| {
+            let idx = param.and_then(|v| v.get::<i32>()).unwrap_or(0);
+            let class = match idx {
+                1 => Some(ContentClass::Text),
+                2 => Some(ContentClass::Image),
+                3 => Some(ContentClass::Files),
+                4 => Some(ContentClass::Url),
+                _ => None, // 0 or unknown = All
+            };
+            p.set_filter(class);
+            load_entries(&p, &i, None, class);
+        }
+    });
 }
 
 /// Helper: create a `SimpleAction`, connect its `activate` signal, and add it
@@ -248,25 +238,21 @@ fn load_entries(
     class: Option<ContentClass>,
 ) {
     let p = popup.clone();
-    ipc.query(query, class, 50, move |result| {
-        match result {
-            Ok(entries) => {
-                if entries.is_empty() {
-                    p.show_empty_state(
-                        "No clipboard history yet.\nCopy something to get started.",
-                    );
-                } else {
-                    p.populate(entries);
-                }
+    ipc.query(query, class, 50, move |result| match result {
+        Ok(entries) => {
+            if entries.is_empty() {
+                p.show_empty_state("No clipboard history yet.\nCopy something to get started.");
+            } else {
+                p.populate(entries);
             }
-            Err(e) => {
-                p.show_error_state(&format!(
-                    "Cannot connect to nixclipd.\n\
+        }
+        Err(e) => {
+            p.show_error_state(&format!(
+                "Cannot connect to nixclipd.\n\
                      Is the daemon running?\n\n\
                      Run 'nixclip doctor' for diagnostics.\n\n\
                      Error: {e}"
-                ));
-            }
+            ));
         }
     });
 }

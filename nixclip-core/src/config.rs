@@ -9,13 +9,14 @@ use crate::error::{NixClipError, Result};
 // Retention
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Retention {
     #[serde(rename = "7days")]
     Days7,
     #[serde(rename = "30days")]
     Days30,
+    #[default]
     #[serde(rename = "3months")]
     Months3,
     #[serde(rename = "6months")]
@@ -50,12 +51,6 @@ impl fmt::Display for Retention {
             Retention::Unlimited => "unlimited",
         };
         f.write_str(s)
-    }
-}
-
-impl Default for Retention {
-    fn default() -> Self {
-        Retention::Months3
     }
 }
 
@@ -266,7 +261,7 @@ impl Default for IgnoreConfig {
 // Config (top level)
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default)]
     pub general: GeneralConfig,
@@ -279,17 +274,6 @@ pub struct Config {
 
     #[serde(default)]
     pub ignore: IgnoreConfig,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            general: GeneralConfig::default(),
-            ui: UiConfig::default(),
-            keybind: KeybindConfig::default(),
-            ignore: IgnoreConfig::default(),
-        }
-    }
 }
 
 impl Config {

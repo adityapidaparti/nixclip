@@ -80,8 +80,7 @@ pub async fn run(json: bool) -> Result<()> {
     // 9. System info (informational, always Ok)
     // -----------------------------------------------------------------------
     let session_type = std::env::var("XDG_SESSION_TYPE").unwrap_or_else(|_| "(not set)".into());
-    let wayland_display =
-        std::env::var("WAYLAND_DISPLAY").unwrap_or_else(|_| "(not set)".into());
+    let wayland_display = std::env::var("WAYLAND_DISPLAY").unwrap_or_else(|_| "(not set)".into());
 
     checks.push(Check {
         label: "XDG_SESSION_TYPE".into(),
@@ -130,7 +129,9 @@ pub async fn run(json: bool) -> Result<()> {
             .any(|c| matches!(c.status, CheckStatus::Warning));
 
         if has_errors {
-            println!("One or more checks failed. Run `journalctl --user -u nixclipd` for daemon logs.");
+            println!(
+                "One or more checks failed. Run `journalctl --user -u nixclipd` for daemon logs."
+            );
         } else if has_warnings {
             println!("Some warnings detected. nixclip may work with reduced functionality.");
         } else {
@@ -421,17 +422,17 @@ fn check_blob_dir() -> Check {
                     Err(e) => Check {
                         label: "Blob directory".into(),
                         status: CheckStatus::Warning,
-                        detail: Some(format!(
-                            "not writable at {}: {e}",
-                            blob_dir.display()
-                        )),
+                        detail: Some(format!("not writable at {}: {e}", blob_dir.display())),
                     },
                 }
             } else {
                 Check {
                     label: "Blob directory".into(),
                     status: CheckStatus::Error,
-                    detail: Some(format!("{} exists but is not a directory", blob_dir.display())),
+                    detail: Some(format!(
+                        "{} exists but is not a directory",
+                        blob_dir.display()
+                    )),
                 }
             }
         }
@@ -454,7 +455,7 @@ fn command_stdout(program: &str, args: &[&str]) -> std::io::Result<String> {
         } else {
             stderr
         };
-        Err(std::io::Error::new(std::io::ErrorKind::Other, detail))
+        Err(std::io::Error::other(detail))
     }
 }
 

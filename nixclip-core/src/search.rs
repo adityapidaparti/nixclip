@@ -394,7 +394,7 @@ fn score_candidates(
     // Second pass: build composite scores, dropping non-matching entries.
     candidates
         .into_iter()
-        .zip(raw_scores.into_iter())
+        .zip(raw_scores)
         .filter_map(|(entry, raw_score)| {
             let raw = raw_score?; // drop entries with no nucleo match
             let normalized = raw as f64 / max_score as f64;

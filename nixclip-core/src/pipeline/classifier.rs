@@ -111,7 +111,7 @@ fn looks_like_url(text: &str) -> bool {
     // Simple domain heuristic: at least one dot, each segment is non-empty
     // and contains only URL-safe characters.
     // e.g. "example.com", "example.com/path", "sub.example.co.uk/foo"
-    let host_part = text.splitn(2, '/').next().unwrap_or(text);
+    let host_part = text.split('/').next().unwrap_or(text);
     let segments: Vec<&str> = host_part.split('.').collect();
     if segments.len() >= 2 {
         let all_valid = segments.iter().all(|seg| {

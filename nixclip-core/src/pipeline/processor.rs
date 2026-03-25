@@ -313,7 +313,7 @@ fn extract_domain(url: &str) -> Option<String> {
 
     // The host is everything up to the first `/`, `?`, `#`, or `:` (port).
     let host = without_scheme
-        .splitn(2, |c| c == '/' || c == '?' || c == '#' || c == ':')
+        .split(['/', '?', '#', ':'])
         .next()
         .unwrap_or(without_scheme);
 
@@ -334,7 +334,7 @@ fn extract_filename_from_uri(uri: &str) -> String {
         let path_start = if rest.starts_with('/') {
             rest
         } else {
-            rest.splitn(2, '/').nth(1).unwrap_or(rest)
+            rest.split_once('/').map(|(_, path)| path).unwrap_or(rest)
         };
         path_start
     } else {

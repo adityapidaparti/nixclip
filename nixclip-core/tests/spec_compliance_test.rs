@@ -1,36 +1,36 @@
-/// Spec-compliance tests for nixclip-core types, config, and error handling.
-///
-/// These tests directly encode every requirement from the PRD / technical
-/// specification so that a future refactor cannot accidentally break the
-/// public contract without a test failure.
-///
-/// Coverage map
-/// ============
-/// TYPES (lib.rs)
-///   - EntryId = i64
-///   - ContentClass variants, serde lowercase, Display, FromStr
-///   - RestoreMode variants
-///   - MimePayload fields
-///   - NewEntry fields
-///   - EntrySummary fields
-///   - Representation fields
-///   - Query fields
-///   - QueryResult fields
-///   - PruneStats fields
-///   - ProcessedEntry fields
-///   - EntryMetadata fields + Default
-///   - StoreStats fields
-///
-/// CONFIG (config.rs)
-///   - GeneralConfig defaults
-///   - Retention enum serialisation round-trip
-///   - UiConfig defaults
-///   - KeybindConfig defaults
-///   - IgnoreConfig defaults (apps, patterns, flag)
-///   - Config path helpers (file-name anchoring)
-///
-/// ERRORS (error.rs)
-///   - All eight NixClipError variants exist and carry the right payload types
+// Spec-compliance tests for nixclip-core types, config, and error handling.
+//
+// These tests directly encode every requirement from the PRD / technical
+// specification so that a future refactor cannot accidentally break the
+// public contract without a test failure.
+//
+// Coverage map
+// ============
+// TYPES (lib.rs)
+//   - EntryId = i64
+//   - ContentClass variants, serde lowercase, Display, FromStr
+//   - RestoreMode variants
+//   - MimePayload fields
+//   - NewEntry fields
+//   - EntrySummary fields
+//   - Representation fields
+//   - Query fields
+//   - QueryResult fields
+//   - PruneStats fields
+//   - ProcessedEntry fields
+//   - EntryMetadata fields + Default
+//   - StoreStats fields
+//
+// CONFIG (config.rs)
+//   - GeneralConfig defaults
+//   - Retention enum serialisation round-trip
+//   - UiConfig defaults
+//   - KeybindConfig defaults
+//   - IgnoreConfig defaults (apps, patterns, flag)
+//   - Config path helpers (file-name anchoring)
+//
+// ERRORS (error.rs)
+//   - All eight NixClipError variants exist and carry the right payload types
 
 use nixclip_core::{
     ContentClass, EntryId, EntryMetadata, EntrySummary, MimePayload, NewEntry, ProcessedEntry,

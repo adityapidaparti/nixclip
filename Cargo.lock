@@ -1529,6 +1529,7 @@ name = "nixclipd"
 version = "0.1.0"
 dependencies = [
  "ashpd",
+ "async-trait",
  "chrono",
  "nix",
  "nixclip-core",

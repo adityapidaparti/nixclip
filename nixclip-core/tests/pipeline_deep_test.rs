@@ -189,7 +189,7 @@ fn truncation_ascii_one_over_limit_is_truncated() {
 #[test]
 fn truncation_multibyte_at_exact_char_limit_not_truncated() {
     // Each 'é' is 2 bytes; PREVIEW_LIMIT of them = PREVIEW_LIMIT chars.
-    let s: String = std::iter::repeat('é').take(PREVIEW_LIMIT).collect();
+    let s = "é".repeat(PREVIEW_LIMIT);
     assert_eq!(s.len(), PREVIEW_LIMIT * 2, "sanity: byte length should be 2×limit");
     assert_eq!(s.chars().count(), PREVIEW_LIMIT, "sanity: char count == limit");
 
@@ -210,7 +210,7 @@ fn truncation_multibyte_at_exact_char_limit_not_truncated() {
 #[test]
 fn truncation_multibyte_one_over_limit_truncated_at_char_boundary() {
     // PREVIEW_LIMIT + 1 repetitions of 'é' (2 bytes each).
-    let s: String = std::iter::repeat('é').take(PREVIEW_LIMIT + 1).collect();
+    let s = "é".repeat(PREVIEW_LIMIT + 1);
     let entry = ContentProcessor::process(vec![payload("text/plain", s.as_bytes())], None)
         .expect("process");
     let preview = entry.preview_text.unwrap();
@@ -230,7 +230,7 @@ fn truncation_multibyte_one_over_limit_truncated_at_char_boundary() {
 #[test]
 fn truncation_three_byte_chars_truncated_correctly() {
     // '中' is 3 bytes; PREVIEW_LIMIT + 1 of them.
-    let s: String = std::iter::repeat('中').take(PREVIEW_LIMIT + 1).collect();
+    let s = "中".repeat(PREVIEW_LIMIT + 1);
     let entry = ContentProcessor::process(vec![payload("text/plain", s.as_bytes())], None)
         .expect("process");
     let preview = entry.preview_text.unwrap();
@@ -242,7 +242,7 @@ fn truncation_three_byte_chars_truncated_correctly() {
 #[test]
 fn truncation_four_byte_chars_truncated_correctly() {
     // '😀' is 4 bytes; PREVIEW_LIMIT + 1 of them.
-    let s: String = std::iter::repeat('😀').take(PREVIEW_LIMIT + 1).collect();
+    let s = "😀".repeat(PREVIEW_LIMIT + 1);
     let entry = ContentProcessor::process(vec![payload("text/plain", s.as_bytes())], None)
         .expect("process");
     let preview = entry.preview_text.unwrap();

@@ -1,11 +1,12 @@
 //! The popup window -- the core of the NixClip UI.
 
+use gtk::prelude::*;
 use gtk4 as gtk;
 use gtk4::gdk;
 use gtk4::glib;
-use gtk::prelude::*;
 use libadwaita as adw;
 
+use nixclip_core::config::Config;
 use nixclip_core::{ContentClass, EntrySummary};
 
 use crate::widgets::entry_row::EntryRow;
@@ -46,15 +47,19 @@ pub struct PopupWindow {
 }
 
 impl PopupWindow {
-    pub fn new(app: &adw::Application) -> Self {
+    pub fn new(app: &adw::Application, config: &Config) -> Self {
         // --- Load custom CSS -------------------------------------------------
         load_badge_css();
+
+        let width = config.ui.width.clamp(480, 1600) as i32;
+        let visible_rows = config.ui.max_visible_entries.clamp(1, 16) as i32;
+        let min_list_height = (visible_rows * 60).max(180);
 
         // --- Window ----------------------------------------------------------
         let window = adw::Window::new();
         window.set_application(Some(app));
         window.set_decorated(false);
-        window.set_default_size(680, 500);
+        window.set_default_size(width, 500);
         window.set_resizable(false);
         // Ask the window manager not to show this in the taskbar.
         // (Note: hide-on-close keeps the window object alive after close.)
@@ -65,7 +70,7 @@ impl PopupWindow {
 
         // Wrap content in an Adwaita Clamp for nice max-width behaviour.
         let clamp = adw::Clamp::new();
-        clamp.set_maximum_size(680);
+        clamp.set_maximum_size(width);
         clamp.set_tightening_threshold(600);
 
         let inner_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -107,8 +112,7 @@ impl PopupWindow {
         let scrolled = gtk::ScrolledWindow::new();
         scrolled.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
         scrolled.set_vexpand(true);
-        // Roughly 8 rows * 60px = 480px minus header/footer.
-        scrolled.set_min_content_height(320);
+        scrolled.set_min_content_height(min_list_height);
         scrolled.set_child(Some(&list_box));
 
         inner_box.append(&empty_label);
@@ -331,9 +335,7 @@ impl PopupWindow {
                                 search_entry
                                     .editable()
                                     .insert_text(&ch.to_string(), &mut pos.clone());
-                                search_entry
-                                    .editable()
-                                    .set_position(pos + 1);
+                                search_entry.editable().set_position(pos + 1);
                                 return glib::Propagation::Stop;
                             }
                         }
@@ -355,21 +357,22 @@ impl PopupWindow {
         let is_active = window.property::<bool>("is-active");
         let _ = is_active; // we read it below via notify
 
-        self.window.connect_notify_local(Some("is-active"), move |win, _| {
-            if !win.is_active() {
-                // Small delay so that transient focus changes (e.g., opening
-                // a confirmation dialog) don't dismiss us immediately.
-                let w = win.clone();
-                glib::timeout_add_local_once(
-                    std::time::Duration::from_millis(150),
-                    move || {
-                        if !w.is_active() {
-                            w.close();
-                        }
-                    },
-                );
-            }
-        });
+        self.window
+            .connect_notify_local(Some("is-active"), move |win, _| {
+                if !win.is_active() {
+                    // Small delay so that transient focus changes (e.g., opening
+                    // a confirmation dialog) don't dismiss us immediately.
+                    let w = win.clone();
+                    glib::timeout_add_local_once(
+                        std::time::Duration::from_millis(150),
+                        move || {
+                            if !w.is_active() {
+                                w.close();
+                            }
+                        },
+                    );
+                }
+            });
     }
 }
 

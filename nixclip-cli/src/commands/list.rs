@@ -25,8 +25,7 @@ pub fn format_age(millis: i64) -> String {
     } else {
         // Format as "Mon DD" (e.g. "Mar 15")
         let secs = millis / 1000;
-        let dt = time_from_unix_secs(secs);
-        dt
+        time_from_unix_secs(secs)
     }
 }
 

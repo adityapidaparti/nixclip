@@ -217,7 +217,7 @@ impl ClipStore {
         all_refs.push(limit_box.as_ref());
         all_refs.push(offset_box.as_ref());
 
-        let rows = stmt.query_map(all_refs.as_slice(), |row| row_to_summary_row(row))?;
+        let rows = stmt.query_map(all_refs.as_slice(), row_to_summary_row)?;
 
         let mut entries = Vec::new();
         for row_result in rows {
@@ -241,7 +241,7 @@ impl ClipStore {
              FROM entries WHERE id = ?1",
         )?;
 
-        let mut summary: EntrySummary = stmt.query_row(params![id], |row| row_to_summary_row(row))?;
+        let mut summary: EntrySummary = stmt.query_row(params![id], row_to_summary_row)?;
         summary.thumbnail = self.load_thumbnail(id);
         Ok(summary)
     }

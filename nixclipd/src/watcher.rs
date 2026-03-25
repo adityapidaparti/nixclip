@@ -46,6 +46,7 @@ pub trait ClipboardBackend: Send + 'static {
     /// Start watching for clipboard changes and send each event to `tx`.
     ///
     /// This method should run indefinitely (or until an error occurs).
+    #[allow(dead_code)]
     async fn watch(&mut self, tx: mpsc::Sender<ClipboardEvent>) -> Result<()>;
 
     /// Set the Wayland clipboard selection to the given representations.
@@ -98,9 +99,9 @@ impl WaylandBackend {
 
         #[cfg(not(target_os = "linux"))]
         {
-            return Err(NixClipError::Wayland(
+            Err(NixClipError::Wayland(
                 "Wayland clipboard is only available on Linux".into(),
-            ));
+            ))
         }
 
         #[cfg(target_os = "linux")]
