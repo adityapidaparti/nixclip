@@ -144,8 +144,8 @@ impl ClipStore {
 
         // Sync the FTS index.
         tx.execute(
-            "INSERT INTO search_idx (rowid, preview_text) VALUES (?1, ?2)",
-            params![entry_id, entry.preview_text],
+            "INSERT INTO search_idx (rowid, preview_text, source_app) VALUES (?1, ?2, ?3)",
+            params![entry_id, entry.preview_text, entry.source_app],
         )?;
 
         tx.commit()?;
@@ -297,20 +297,19 @@ impl ClipStore {
 
             // Fetch preview_text before deleting the row so we can remove
             // the FTS entry with the correct original value.
-            let preview_text: Option<String> = tx
+            let (preview_text, source_app): (Option<String>, Option<String>) = tx
                 .query_row(
-                    "SELECT preview_text FROM entries WHERE id = ?1",
+                    "SELECT preview_text, source_app FROM entries WHERE id = ?1",
                     params![id],
-                    |row| row.get(0),
+                    |row| Ok((row.get(0)?, row.get(1)?)),
                 )
-                .ok()
-                .flatten();
+                .unwrap_or((None, None));
 
             // Delete FTS entry (must supply the original column values).
             tx.execute(
-                "INSERT INTO search_idx (search_idx, rowid, preview_text)
-                 VALUES ('delete', ?1, ?2)",
-                params![id, preview_text],
+                "INSERT INTO search_idx (search_idx, rowid, preview_text, source_app)
+                 VALUES ('delete', ?1, ?2, ?3)",
+                params![id, preview_text, source_app],
             )?;
 
             // Delete the entry (cascades to representations).
@@ -540,8 +539,8 @@ impl ClipStore {
     pub fn rebuild_fts(&self) -> Result<()> {
         self.conn.execute("DELETE FROM search_idx", [])?;
         self.conn.execute(
-            "INSERT INTO search_idx (rowid, preview_text)
-             SELECT id, preview_text FROM entries",
+            "INSERT INTO search_idx (rowid, preview_text, source_app)
+             SELECT id, preview_text, source_app FROM entries",
             [],
         )?;
         Ok(())
@@ -687,6 +686,7 @@ fn row_to_summary_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<EntrySummary>
         preview_text: row.get(6)?,
         source_app: row.get(7)?,
         thumbnail: None, // Loaded separately.
+        match_ranges: vec![],
     })
 }
 

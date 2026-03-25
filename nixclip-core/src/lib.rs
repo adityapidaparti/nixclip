@@ -118,6 +118,10 @@ pub struct EntrySummary {
     pub preview_text: Option<String>,
     pub source_app: Option<String>,
     pub thumbnail: Option<Vec<u8>>,
+    /// Byte ranges in `preview_text` that matched the search query.
+    /// Each tuple is (start_byte, length_bytes). Empty when there is no query.
+    #[serde(default)]
+    pub match_ranges: Vec<(u32, u32)>,
 }
 
 // ---------------------------------------------------------------------------

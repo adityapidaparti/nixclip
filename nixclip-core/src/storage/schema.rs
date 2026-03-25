@@ -51,7 +51,7 @@ pub fn init_schema(conn: &rusqlite::Connection) -> Result<()> {
     // FTS5 full-text search index
     conn.execute_batch(
         "CREATE VIRTUAL TABLE IF NOT EXISTS search_idx
-             USING fts5(preview_text, content=entries, content_rowid=id);",
+             USING fts5(preview_text, source_app, content=entries, content_rowid=id);",
     )?;
 
     // Schema version tracking table
