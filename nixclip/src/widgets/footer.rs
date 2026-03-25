@@ -1,5 +1,5 @@
-use gtk4 as gtk;
 use gtk::prelude::*;
+use gtk4 as gtk;
 
 /// The keyboard-hints footer bar shown at the bottom of the popup.
 ///

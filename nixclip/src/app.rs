@@ -1,13 +1,13 @@
 //! Application state and lifecycle for the NixClip popup UI.
 //!
-//! Handles window creation, IPC connection, and wiring keyboard-shortcut
-//! actions to the daemon.
+//! Handles window creation, IPC connection, activation-token presentation,
+//! and wiring keyboard-shortcut actions to the daemon.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
 use adw::prelude::*;
-use gtk::prelude::*;
 use gtk4 as gtk;
 use gtk4::gio;
 use gtk4::glib;
@@ -19,45 +19,85 @@ use nixclip_core::{ContentClass, RestoreMode};
 use crate::ipc_client::UiIpcClient;
 use crate::window::PopupWindow;
 
-// ---------------------------------------------------------------------------
-// Activation entry-point
-// ---------------------------------------------------------------------------
-
-/// Called by `Application::connect_activate`.  Creates the popup window,
-/// connects to the daemon, wires actions and callbacks, and presents.
-pub fn activate(app: &adw::Application) {
-    let config = Config::load_or_default();
-    let socket_path = Config::socket_path();
-
-    let ipc = Rc::new(UiIpcClient::new(&socket_path));
-    let popup = Rc::new(PopupWindow::new(app, &config));
-
-    setup_actions(&popup, &ipc);
-    setup_search(&popup, &ipc);
-    setup_filters(&popup, &ipc);
-
-    // Initial load.
-    load_entries(&popup, &ipc, None, None);
-
-    popup.window.present();
+#[derive(Clone, Default)]
+struct QueryState {
+    text: Option<String>,
+    class: Option<ContentClass>,
 }
 
-// ---------------------------------------------------------------------------
-// Actions (installed on the window so `win.xxx` works from key controller)
-// ---------------------------------------------------------------------------
+struct UiHandle {
+    ipc: Rc<UiIpcClient>,
+    popup: Rc<PopupWindow>,
+    query_state: Rc<RefCell<QueryState>>,
+}
 
-fn setup_actions(popup: &Rc<PopupWindow>, ipc: &Rc<UiIpcClient>) {
+impl UiHandle {
+    fn new(app: &adw::Application) -> Self {
+        let config = Config::load_or_default();
+        let socket_path = Config::socket_path();
+
+        let ipc = Rc::new(UiIpcClient::new(&socket_path));
+        let popup = Rc::new(PopupWindow::new(app, &config));
+        let query_state = Rc::new(RefCell::new(QueryState::default()));
+
+        setup_actions(&popup, &ipc, &query_state);
+        setup_search(&popup, &ipc, &query_state);
+        setup_filters(&popup, &ipc, &query_state);
+
+        Self {
+            ipc,
+            popup,
+            query_state,
+        }
+    }
+
+    fn present(&self, activation_token: Option<&str>) {
+        self.query_state.replace(QueryState::default());
+        self.popup.search_bar().clear();
+        self.popup.set_filter(None);
+        load_entries(&self.popup, &self.ipc, &self.query_state);
+
+        if let Some(token) = activation_token {
+            self.popup.window.set_startup_id(token);
+        }
+
+        self.popup.window.present();
+        self.popup.search_bar().entry.grab_focus();
+    }
+}
+
+/// Called by `Application::connect_activate` or `connect_command_line`.
+/// Reuses a single popup window inside the primary process.
+pub(crate) fn activate(
+    app: &adw::Application,
+    state: &Rc<RefCell<Option<UiHandle>>>,
+    activation_token: Option<&str>,
+) {
+    let mut state = state.borrow_mut();
+    if state.is_none() {
+        *state = Some(UiHandle::new(app));
+    }
+
+    if let Some(ui) = state.as_ref() {
+        ui.present(activation_token);
+    }
+}
+
+fn setup_actions(
+    popup: &Rc<PopupWindow>,
+    ipc: &Rc<UiIpcClient>,
+    query_state: &Rc<RefCell<QueryState>>,
+) {
     let win = &popup.window;
 
-    // --- restore-original ---------------------------------------------------
     add_action(win, "restore-original", None, {
         let p = popup.clone();
         let i = ipc.clone();
         move |_, _| {
             if let Some(entry) = p.get_selected_entry() {
-                i.restore(entry.id, RestoreMode::Original, |r| {
-                    if let Err(e) = r {
-                        tracing::warn!(error = %e, "restore failed");
+                i.restore(entry.id, RestoreMode::Original, |result| {
+                    if let Err(error) = result {
+                        tracing::warn!(error = %error, "restore failed");
                     }
                 });
                 p.window.close();
@@ -65,15 +105,14 @@ fn setup_actions(popup: &Rc<PopupWindow>, ipc: &Rc<UiIpcClient>) {
         }
     });
 
-    // --- restore-plain ------------------------------------------------------
     add_action(win, "restore-plain", None, {
         let p = popup.clone();
         let i = ipc.clone();
         move |_, _| {
             if let Some(entry) = p.get_selected_entry() {
-                i.restore(entry.id, RestoreMode::PlainText, |r| {
-                    if let Err(e) = r {
-                        tracing::warn!(error = %e, "restore plain failed");
+                i.restore(entry.id, RestoreMode::PlainText, |result| {
+                    if let Err(error) = result {
+                        tracing::warn!(error = %error, "restore plain failed");
                     }
                 });
                 p.window.close();
@@ -81,48 +120,50 @@ fn setup_actions(popup: &Rc<PopupWindow>, ipc: &Rc<UiIpcClient>) {
         }
     });
 
-    // --- delete-entry -------------------------------------------------------
     add_action(win, "delete-entry", None, {
         let p = popup.clone();
         let i = ipc.clone();
+        let q = query_state.clone();
         move |_, _| {
             if let Some(entry) = p.get_selected_entry() {
                 let pp = p.clone();
                 let ii = i.clone();
-                i.delete(entry.id, move |r| {
-                    if let Err(e) = r {
-                        tracing::warn!(error = %e, "delete failed");
+                let qq = q.clone();
+                i.delete(entry.id, move |result| {
+                    if let Err(error) = result {
+                        tracing::warn!(error = %error, "delete failed");
                     } else {
-                        load_entries(&pp, &ii, None, None);
+                        load_entries(&pp, &ii, &qq);
                     }
                 });
             }
         }
     });
 
-    // --- toggle-pin ---------------------------------------------------------
     add_action(win, "toggle-pin", None, {
         let p = popup.clone();
         let i = ipc.clone();
+        let q = query_state.clone();
         move |_, _| {
             if let Some(entry) = p.get_selected_entry() {
                 let pp = p.clone();
                 let ii = i.clone();
-                i.pin(entry.id, !entry.pinned, move |r| {
-                    if let Err(e) = r {
-                        tracing::warn!(error = %e, "pin toggle failed");
+                let qq = q.clone();
+                i.pin(entry.id, !entry.pinned, move |result| {
+                    if let Err(error) = result {
+                        tracing::warn!(error = %error, "pin toggle failed");
                     } else {
-                        load_entries(&pp, &ii, None, None);
+                        load_entries(&pp, &ii, &qq);
                     }
                 });
             }
         }
     });
 
-    // --- clear-all ----------------------------------------------------------
     add_action(win, "clear-all", None, {
         let p = popup.clone();
         let i = ipc.clone();
+        let q = query_state.clone();
         move |_, _| {
             let dialog = adw::MessageDialog::new(
                 Some(&p.window),
@@ -140,15 +181,17 @@ fn setup_actions(popup: &Rc<PopupWindow>, ipc: &Rc<UiIpcClient>) {
 
             let pp = p.clone();
             let ii = i.clone();
+            let qq = q.clone();
             dialog.connect_response(None, move |_dlg, response| {
                 if response == "clear" {
                     let ppp = pp.clone();
                     let iii = ii.clone();
-                    ii.clear_unpinned(move |r| {
-                        if let Err(e) = r {
-                            tracing::warn!(error = %e, "clear all failed");
+                    let qqq = qq.clone();
+                    ii.clear_unpinned(move |result| {
+                        if let Err(error) = result {
+                            tracing::warn!(error = %error, "clear all failed");
                         } else {
-                            load_entries(&ppp, &iii, None, None);
+                            load_entries(&ppp, &iii, &qqq);
                         }
                     });
                 }
@@ -157,49 +200,95 @@ fn setup_actions(popup: &Rc<PopupWindow>, ipc: &Rc<UiIpcClient>) {
         }
     });
 
-    // --- open-settings ------------------------------------------------------
     add_action(win, "open-settings", None, {
         let p = popup.clone();
+        let i = ipc.clone();
+        let q = query_state.clone();
         move |_, _| {
             let app = p.window.application().expect("window missing application");
             let adw_app: adw::Application = app.downcast().expect("not an adw::Application");
-            let config = Config::load_or_default();
 
-            let settings_win =
-                crate::settings::build_settings_window(&adw_app, config, |_new_config| {
-                    // In a full implementation, send SetConfig IPC to the daemon.
-                    tracing::info!("settings updated");
-                });
-            settings_win.set_transient_for(Some(&p.window));
-            settings_win.present();
+            let pp = p.clone();
+            let ii = i.clone();
+            let qq = q.clone();
+            i.get_config(move |result| {
+                let config = match result {
+                    Ok(config) => config,
+                    Err(error) => {
+                        tracing::warn!(error = %error, "failed to fetch daemon config");
+                        Config::load_or_default()
+                    }
+                };
+
+                let on_changed: Rc<dyn Fn(Config)> = {
+                    let ipc = ii.clone();
+                    Rc::new(move |new_config: Config| {
+                        ipc.set_config(new_config, |result| {
+                            if let Err(error) = result {
+                                tracing::warn!(error = %error, "settings update failed");
+                            }
+                        });
+                    })
+                };
+
+                let on_clear_history: Rc<dyn Fn()> = {
+                    let p = pp.clone();
+                    let i = ii.clone();
+                    let q = qq.clone();
+                    Rc::new(move || {
+                        let pp = p.clone();
+                        let ii = i.clone();
+                        let qq = q.clone();
+                        i.clear_unpinned(move |result| {
+                            if let Err(error) = result {
+                                tracing::warn!(
+                                    error = %error,
+                                    "clear history from settings failed"
+                                );
+                            } else {
+                                load_entries(&pp, &ii, &qq);
+                            }
+                        });
+                    })
+                };
+
+                let settings_win = crate::settings::build_settings_window(
+                    &adw_app,
+                    config,
+                    on_changed,
+                    on_clear_history,
+                );
+                settings_win.set_transient_for(Some(&pp.window));
+                settings_win.present();
+            });
         }
     });
 
-    // --- filter (parameterised: i32 index) ----------------------------------
-    add_action(win, "filter", Some(&i32::static_variant_type()), {
+    add_action(win, "filter", Some(glib::VariantTy::INT32), {
         let p = popup.clone();
         let i = ipc.clone();
+        let q = query_state.clone();
         move |_, param| {
-            let idx = param.and_then(|v| v.get::<i32>()).unwrap_or(0);
+            let idx = param.and_then(|value| value.get::<i32>()).unwrap_or(0);
             let class = match idx {
                 1 => Some(ContentClass::Text),
                 2 => Some(ContentClass::Image),
                 3 => Some(ContentClass::Files),
                 4 => Some(ContentClass::Url),
-                _ => None, // 0 or unknown = All
+                _ => None,
             };
+
             p.set_filter(class);
-            load_entries(&p, &i, None, class);
+            q.borrow_mut().class = class;
+            load_entries(&p, &i, &q);
         }
     });
 }
 
-/// Helper: create a `SimpleAction`, connect its `activate` signal, and add it
-/// to the given window's action group.
 fn add_action(
-    window: &adw::Window,
+    window: &adw::ApplicationWindow,
     name: &str,
-    parameter_type: Option<&glib::VariantType>,
+    parameter_type: Option<&glib::VariantTy>,
     callback: impl Fn(&gio::SimpleAction, Option<&glib::Variant>) + 'static,
 ) {
     let action = gio::SimpleAction::new(name, parameter_type);
@@ -207,72 +296,79 @@ fn add_action(
     window.add_action(&action);
 }
 
-// ---------------------------------------------------------------------------
-// Search & filter callbacks
-// ---------------------------------------------------------------------------
-
-fn setup_search(popup: &Rc<PopupWindow>, ipc: &Rc<UiIpcClient>) {
+fn setup_search(
+    popup: &Rc<PopupWindow>,
+    ipc: &Rc<UiIpcClient>,
+    query_state: &Rc<RefCell<QueryState>>,
+) {
     let p = popup.clone();
     let i = ipc.clone();
+    let q = query_state.clone();
     popup.search_bar().connect_search_changed(move |text| {
-        let query = if text.is_empty() { None } else { Some(text) };
-        load_entries(&p, &i, query, None);
+        q.borrow_mut().text = if text.is_empty() { None } else { Some(text) };
+        load_entries(&p, &i, &q);
     });
 }
 
-fn setup_filters(popup: &Rc<PopupWindow>, ipc: &Rc<UiIpcClient>) {
+fn setup_filters(
+    popup: &Rc<PopupWindow>,
+    ipc: &Rc<UiIpcClient>,
+    query_state: &Rc<RefCell<QueryState>>,
+) {
     let p = popup.clone();
     let i = ipc.clone();
+    let q = query_state.clone();
     popup.filter_tabs().connect_filter_changed(move |class| {
-        load_entries(&p, &i, None, class);
+        q.borrow_mut().class = class;
+        load_entries(&p, &i, &q);
     });
 }
-
-// ---------------------------------------------------------------------------
-// Data loading
-// ---------------------------------------------------------------------------
 
 fn load_entries(
     popup: &Rc<PopupWindow>,
     ipc: &Rc<UiIpcClient>,
-    query: Option<String>,
-    class: Option<ContentClass>,
+    query_state: &Rc<RefCell<QueryState>>,
 ) {
-    let p = popup.clone();
-    let update_tabs = class.is_none();
-    ipc.query(query, class, 50, move |result| {
-        match result {
-            Ok((entries, total)) => {
-                if entries.is_empty() {
-                    p.show_empty_state(
-                        "No clipboard history yet.\nCopy something to get started.",
-                    );
-                    p.clear_result_count();
-                } else {
-                    // When loading the unfiltered view, update which filter
-                    // tabs are visible based on the content classes present.
-                    if update_tabs {
-                        let mut counts: HashMap<ContentClass, u32> = HashMap::new();
-                        for e in &entries {
-                            *counts.entry(e.content_class).or_insert(0) += 1;
-                        }
-                        p.update_visible_tabs(&counts);
-                    }
+    let state = query_state.borrow().clone();
+    let empty_message = if let Some(query) = &state.text {
+        format!("No matches for '{query}'. Try a different search.")
+    } else if state.class.is_some() {
+        "No clipboard history for the selected filter.".to_string()
+    } else {
+        "No clipboard history yet.\nCopy something to get started.".to_string()
+    };
 
-                    let shown = entries.len();
-                    p.populate(entries);
-                    p.update_result_count(shown, total);
-                }
-            }
-            Err(e) => {
+    let update_tabs = state.class.is_none();
+    popup.show_loading();
+
+    let p = popup.clone();
+    ipc.query(state.text, state.class, 50, move |result| match result {
+        Ok((entries, total)) => {
+            if entries.is_empty() {
+                p.show_empty_state(&empty_message);
                 p.clear_result_count();
-                p.show_error_state(&format!(
-                    "Cannot connect to nixclipd.\n\
-                     Is the daemon running?\n\n\
-                     Run 'nixclip doctor' for diagnostics.\n\n\
-                     Error: {e}"
-                ));
+            } else {
+                if update_tabs {
+                    let mut counts: HashMap<ContentClass, u32> = HashMap::new();
+                    for entry in &entries {
+                        *counts.entry(entry.content_class).or_insert(0) += 1;
+                    }
+                    p.update_visible_tabs(&counts);
+                }
+
+                let shown = entries.len();
+                p.populate(entries);
+                p.update_result_count(shown, total);
             }
+        }
+        Err(error) => {
+            p.clear_result_count();
+            p.show_error_state(&format!(
+                "Cannot connect to nixclipd.\n\
+                 Is the daemon running?\n\n\
+                 Run 'nixclip doctor' for diagnostics.\n\n\
+                 Error: {error}"
+            ));
         }
     });
 }

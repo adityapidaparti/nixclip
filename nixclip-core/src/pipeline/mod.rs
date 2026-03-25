@@ -1,6 +1,6 @@
 pub mod classifier;
-pub mod processor;
 pub mod privacy;
+pub mod processor;
 
-pub use processor::ContentProcessor;
 pub use privacy::PrivacyFilter;
+pub use processor::ContentProcessor;

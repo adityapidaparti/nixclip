@@ -5,14 +5,13 @@
 
 use std::sync::Arc;
 
+use nix::libc;
 use tokio::net::{UnixListener, UnixStream};
 use tracing::{debug, error, info, warn};
 
 use nixclip_core::config::Config;
 use nixclip_core::error::{NixClipError, Result};
-use nixclip_core::ipc::{
-    recv_message, send_message, ClientMessage, ServerMessage,
-};
+use nixclip_core::ipc::{recv_message, send_message, ClientMessage, ServerMessage};
 use nixclip_core::{ContentClass, Query, RestoreMode};
 
 use crate::watcher;
@@ -29,16 +28,12 @@ pub async fn run(state: Arc<AppState>) -> Result<()> {
     // Remove a stale socket file from a previous run.
     if socket_path.exists() {
         info!(path = %socket_path.display(), "removing stale socket");
-        std::fs::remove_file(&socket_path).map_err(|e| {
-            NixClipError::Io(e)
-        })?;
+        std::fs::remove_file(&socket_path).map_err(NixClipError::Io)?;
     }
 
     // Ensure the parent directory exists.
     if let Some(parent) = socket_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| {
-            NixClipError::Io(e)
-        })?;
+        std::fs::create_dir_all(parent).map_err(NixClipError::Io)?;
     }
 
     let listener = UnixListener::bind(&socket_path)?;
@@ -154,7 +149,10 @@ async fn handle_client(state: Arc<AppState>, stream: UnixStream) -> Result<()> {
             Err(e) => return Err(e),
         };
 
-        debug!(msg_type = std::any::type_name::<ClientMessage>(), "received IPC message");
+        debug!(
+            msg_type = std::any::type_name::<ClientMessage>(),
+            "received IPC message"
+        );
 
         let response = match msg {
             ClientMessage::Subscribe { .. } => {
@@ -170,21 +168,13 @@ async fn handle_client(state: Arc<AppState>, stream: UnixStream) -> Result<()> {
                 limit,
                 ..
             } => handle_query(&state, text, content_class, offset, limit).await,
-            ClientMessage::Restore { id, mode, .. } => {
-                handle_restore(&state, id, mode).await
-            }
+            ClientMessage::Restore { id, mode, .. } => handle_restore(&state, id, mode).await,
             ClientMessage::Delete { ids, .. } => handle_delete(&state, ids).await,
-            ClientMessage::Pin { id, pinned, .. } => {
-                handle_pin(&state, id, pinned).await
-            }
+            ClientMessage::Pin { id, pinned, .. } => handle_pin(&state, id, pinned).await,
             ClientMessage::ClearUnpinned { .. } => handle_clear_unpinned(&state).await,
             ClientMessage::GetConfig { .. } => handle_get_config(&state).await,
-            ClientMessage::SetConfig { patch, .. } => {
-                handle_set_config(&state, patch).await
-            }
-            ClientMessage::GetEntry { id, .. } => {
-                handle_get_entry(&state, id).await
-            }
+            ClientMessage::SetConfig { patch, .. } => handle_set_config(&state, patch).await,
+            ClientMessage::GetEntry { id, .. } => handle_get_entry(&state, id).await,
         };
 
         send_message(&mut writer, &response).await?;
@@ -196,10 +186,7 @@ async fn handle_client(state: Arc<AppState>, stream: UnixStream) -> Result<()> {
 // ---------------------------------------------------------------------------
 
 /// Subscribe: push `NewEntry` events to the client until it disconnects.
-async fn handle_subscribe(
-    state: Arc<AppState>,
-    writer: &mut tokio::net::unix::OwnedWriteHalf,
-) {
+async fn handle_subscribe(state: Arc<AppState>, writer: &mut tokio::net::unix::OwnedWriteHalf) {
     let mut rx = state.new_entry_tx.subscribe();
 
     loop {
@@ -285,10 +272,7 @@ async fn handle_query(
 }
 
 /// Fetch a single entry by ID.
-async fn handle_get_entry(
-    state: &AppState,
-    id: nixclip_core::EntryId,
-) -> ServerMessage {
+async fn handle_get_entry(state: &AppState, id: nixclip_core::EntryId) -> ServerMessage {
     let result = {
         let store = match state.store.lock() {
             Ok(s) => s,
@@ -344,12 +328,10 @@ async fn handle_restore(
     // Filter representations based on restore mode.
     let to_restore = match mode {
         RestoreMode::Original => representations,
-        RestoreMode::PlainText => {
-            representations
-                .into_iter()
-                .filter(|r| r.mime == "text/plain")
-                .collect::<Vec<_>>()
-        }
+        RestoreMode::PlainText => representations
+            .into_iter()
+            .filter(|r| r.mime == "text/plain")
+            .collect::<Vec<_>>(),
     };
 
     if to_restore.is_empty() {
@@ -364,10 +346,7 @@ async fn handle_restore(
 }
 
 /// Delete one or more entries by ID.
-async fn handle_delete(
-    state: &AppState,
-    ids: Vec<nixclip_core::EntryId>,
-) -> ServerMessage {
+async fn handle_delete(state: &AppState, ids: Vec<nixclip_core::EntryId>) -> ServerMessage {
     let result = {
         let store = match state.store.lock() {
             Ok(s) => s,
@@ -385,11 +364,7 @@ async fn handle_delete(
 }
 
 /// Pin or unpin an entry.
-async fn handle_pin(
-    state: &AppState,
-    id: nixclip_core::EntryId,
-    pinned: bool,
-) -> ServerMessage {
+async fn handle_pin(state: &AppState, id: nixclip_core::EntryId, pinned: bool) -> ServerMessage {
     let result = {
         let store = match state.store.lock() {
             Ok(s) => s,
@@ -431,19 +406,14 @@ async fn handle_get_config(state: &AppState) -> ServerMessage {
 }
 
 /// Apply a partial TOML patch to the configuration and reload related state.
-async fn handle_set_config(
-    state: &AppState,
-    patch: toml::Value,
-) -> ServerMessage {
+async fn handle_set_config(state: &AppState, patch: toml::Value) -> ServerMessage {
     // Merge the patch into the current config.
     let new_config = {
         let current = state.config.read().await;
         let current_value = match toml::Value::try_from(current.clone()) {
             Ok(v) => v,
             Err(e) => {
-                return ServerMessage::error(format!(
-                    "failed to serialize current config: {e}"
-                ));
+                return ServerMessage::error(format!("failed to serialize current config: {e}"));
             }
         };
         let merged = merge_toml(current_value, patch);

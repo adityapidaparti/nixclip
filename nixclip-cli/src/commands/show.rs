@@ -50,15 +50,16 @@ pub async fn run(client: &mut IpcClient, id: i64, json: bool) -> Result<()> {
                     } else {
                         println!("ID:           {}", entry.id);
                         println!("Type:         {}", entry.content_class);
-                        println!(
-                            "Pinned:       {}",
-                            if entry.pinned { "yes" } else { "no" }
-                        );
+                        println!("Pinned:       {}", if entry.pinned { "yes" } else { "no" });
                         println!(
                             "Ephemeral:    {}",
                             if entry.ephemeral { "yes" } else { "no" }
                         );
-                        println!("Created:      {} ({})", entry.created_at, format_age(entry.created_at));
+                        println!(
+                            "Created:      {} ({})",
+                            entry.created_at,
+                            format_age(entry.created_at)
+                        );
                         println!("Last seen:    {}", format_age(entry.last_seen_at));
                         if let Some(app) = &entry.source_app {
                             println!("Source app:   {}", app);

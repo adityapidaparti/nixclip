@@ -141,7 +141,11 @@ pub async fn run(
                     print_entry_row(entry);
                 }
                 println!();
-                println!("Showing {} of {} entries. Use --limit to see more.", entries.len(), total);
+                println!(
+                    "Showing {} of {} entries. Use --limit to see more.",
+                    entries.len(),
+                    total
+                );
             }
         }
         ServerMessage::Error { message, .. } => {

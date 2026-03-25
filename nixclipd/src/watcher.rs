@@ -10,6 +10,12 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
+#[cfg(target_os = "linux")]
+use wayland_client::globals::{registry_queue_init, GlobalListContents};
+#[cfg(target_os = "linux")]
+use wayland_client::protocol::wl_registry;
+#[cfg(target_os = "linux")]
+use wayland_client::{Connection, Dispatch, QueueHandle};
 
 use nixclip_core::error::{NixClipError, Result};
 use nixclip_core::pipeline::privacy::FilterResult;
@@ -17,6 +23,10 @@ use nixclip_core::pipeline::ContentProcessor;
 use nixclip_core::{MimePayload, NewEntry, Representation};
 
 use crate::AppState;
+
+#[allow(dead_code)]
+#[cfg(any(test, target_os = "linux"))]
+type DirectMimeSource = wl_clipboard_rs::copy::MimeSource;
 
 // ---------------------------------------------------------------------------
 // ClipboardEvent
@@ -48,9 +58,6 @@ pub trait ClipboardBackend: Send + 'static {
     /// This method should run indefinitely (or until an error occurs).
     #[allow(dead_code)]
     async fn watch(&mut self, tx: mpsc::Sender<ClipboardEvent>) -> Result<()>;
-
-    /// Set the Wayland clipboard selection to the given representations.
-    async fn set_selection(&self, representations: Vec<Representation>) -> Result<()>;
 }
 
 // ---------------------------------------------------------------------------
@@ -64,96 +71,148 @@ pub trait ClipboardBackend: Send + 'static {
 /// structured for correctness on a Wayland system.  On non-Linux builds the
 /// backend simply returns an error explaining that Wayland is unavailable.
 pub struct WaylandBackend {
-    // On a real Wayland system these fields would hold:
-    //   connection: wayland_client::Connection,
-    //   manager: data_control_manager proxy,
-    //   seat: wl_seat proxy,
-    //
-    // TODO: Store the Wayland Connection, EventQueue, data-control manager
-    //       proxy, and seat proxy here once the exact crate API is pinned down.
-    _private: (),
+    protocol: DirectDataControlProtocol,
+    #[allow(dead_code)]
+    seat_count: usize,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DirectDataControlProtocol {
+    ExtDataControlV1,
+    WlrDataControlV1,
+}
+
+#[allow(dead_code)]
+impl DirectDataControlProtocol {
+    fn global_name(self) -> &'static str {
+        match self {
+            Self::ExtDataControlV1 => "ext_data_control_manager_v1",
+            Self::WlrDataControlV1 => "zwlr_data_control_manager_v1",
+        }
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct WaylandProbe {
+    protocol: Option<DirectDataControlProtocol>,
+    seat_count: usize,
+}
+
+#[allow(dead_code)]
+impl WaylandProbe {
+    fn from_interfaces<'a>(interfaces: impl IntoIterator<Item = &'a str>) -> Self {
+        let mut seat_count = 0usize;
+        let mut saw_ext = false;
+        let mut saw_wlr = false;
+
+        for interface in interfaces {
+            match interface {
+                "wl_seat" => seat_count += 1,
+                "ext_data_control_manager_v1" => saw_ext = true,
+                "zwlr_data_control_manager_v1" => saw_wlr = true,
+                _ => {}
+            }
+        }
+
+        let protocol = if saw_ext {
+            Some(DirectDataControlProtocol::ExtDataControlV1)
+        } else if saw_wlr {
+            Some(DirectDataControlProtocol::WlrDataControlV1)
+        } else {
+            None
+        };
+
+        Self { protocol, seat_count }
+    }
 }
 
 impl WaylandBackend {
+    #[cfg(target_os = "linux")]
+    fn probe() -> Result<WaylandProbe> {
+        let connection = Connection::connect_to_env()
+            .map_err(|e| NixClipError::Wayland(format!("connect to Wayland display: {e}")))?;
+        let (globals, mut event_queue) = registry_queue_init::<WaylandRegistryState>(&connection)
+            .map_err(|e| NixClipError::Wayland(format!("enumerate Wayland globals: {e}")))?;
+        let mut state = WaylandRegistryState;
+        event_queue
+            .roundtrip(&mut state)
+            .map_err(|e| NixClipError::Wayland(format!("roundtrip Wayland globals: {e}")))?;
+
+        Ok(WaylandProbe::from_interfaces(
+            globals
+                .contents()
+                .clone_list()
+                .iter()
+                .map(|global| global.interface.as_str()),
+        ))
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn probe() -> Result<WaylandProbe> {
+        Err(NixClipError::Wayland(
+            "Wayland clipboard is only available on Linux".into(),
+        ))
+    }
+
     /// Connect to the Wayland display and locate the data-control manager.
     ///
     /// Looks for `ext_data_control_manager_v1` first, then falls back to
     /// `zwlr_data_control_manager_v1`.
     pub fn connect() -> Result<Self> {
-        // TODO: Full Wayland integration.
-        //
-        // Outline of what this should do:
-        //
-        // 1. let connection = wayland_client::Connection::connect_to_env()
-        //        .map_err(|e| NixClipError::Wayland(format!("connect: {e}")))?;
-        // 2. let display = connection.display();
-        // 3. let mut event_queue = connection.new_event_queue();
-        // 4. Enumerate globals via wl_registry, looking for:
-        //    - ext_data_control_manager_v1 (preferred, from staging protocols)
-        //    - zwlr_data_control_manager_v1 (fallback, from wlr-protocols)
-        //    - wl_seat (to get the default seat)
-        // 5. Create a data_control_device from the manager + seat.
-        // 6. Store connection, event_queue, manager, device, seat.
-        //
-        // For now we indicate that the Wayland connection is not yet available.
+        let probe = Self::probe()?;
 
-        #[cfg(not(target_os = "linux"))]
-        {
-            Err(NixClipError::Wayland(
-                "Wayland clipboard is only available on Linux".into(),
-            ))
-        }
-
-        #[cfg(target_os = "linux")]
-        {
-            // Attempt connection -- this will fail if $WAYLAND_DISPLAY is unset
-            // or the compositor isn't running.
-            //
-            // TODO: Replace with actual wayland_client::Connection::connect_to_env()
-            //       once the crate API is validated.
-            Err(NixClipError::Wayland(
-                "Wayland data-control integration not yet implemented; \
-                 see TODO comments in watcher.rs"
+        let protocol = probe.protocol.ok_or_else(|| {
+            NixClipError::Wayland(
+                "compositor does not expose ext_data_control_manager_v1 or zwlr_data_control_manager_v1"
                     .into(),
-            ))
+            )
+        })?;
+
+        if probe.seat_count == 0 {
+            return Err(NixClipError::Wayland(
+                "compositor exposes data-control but no wl_seat globals were advertised".into(),
+            ));
         }
+
+        Ok(Self {
+            protocol,
+            seat_count: probe.seat_count,
+        })
     }
 }
 
 #[async_trait]
 impl ClipboardBackend for WaylandBackend {
     async fn watch(&mut self, _tx: mpsc::Sender<ClipboardEvent>) -> Result<()> {
-        // TODO: Full implementation outline:
-        //
-        // 1. Run the Wayland event loop (roundtrip / dispatch) in a
-        //    spawn_blocking context or a dedicated thread.
-        // 2. On data_control_device.selection event:
-        //    a. Read the offered MIME types from the data_control_offer.
-        //    b. For each relevant MIME (text/plain, text/html, image/png, etc.),
-        //       open a pipe, call offer.receive(mime, write_fd), roundtrip,
-        //       then read the data from the read end.
-        //    c. Build a ClipboardEvent with the payloads.
-        //    d. Send it through `tx`.
-        // 3. Repeat until the connection is closed or an error occurs.
-
         Err(NixClipError::Wayland(
-            "Wayland watcher not yet implemented".into(),
+            format!(
+                "direct {} capture is detected but not implemented: \
+                 watcher needs a persistent Wayland event-queue thread that owns \
+                 wl_seat/data-control device objects and drains offer FDs on selection events \
+                 (detected {} seat global(s))",
+                self.protocol.global_name(),
+                self.seat_count
+            ),
         ))
     }
+}
 
-    async fn set_selection(&self, _representations: Vec<Representation>) -> Result<()> {
-        // TODO: Full implementation outline:
-        //
-        // 1. Create a new data_control_source.
-        // 2. For each representation, advertise the MIME type via source.offer(mime).
-        // 3. Set the source as the current selection:
-        //    data_control_device.set_selection(source).
-        // 4. When the compositor requests data (send event), write the
-        //    corresponding representation bytes to the provided fd.
+#[cfg(target_os = "linux")]
+#[derive(Debug)]
+struct WaylandRegistryState;
 
-        Err(NixClipError::Wayland(
-            "Wayland set_selection not yet implemented".into(),
-        ))
+#[cfg(target_os = "linux")]
+impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for WaylandRegistryState {
+    fn event(
+        _: &mut Self,
+        _: &wl_registry::WlRegistry,
+        _: wl_registry::Event,
+        _: &GlobalListContents,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
     }
 }
 
@@ -173,6 +232,17 @@ impl WlPasteBackend {
     /// Check if `wl-paste` is available in `$PATH`.
     pub fn available() -> bool {
         std::process::Command::new("wl-paste")
+            .arg("--version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+
+    /// Check if `wl-copy` is available in `$PATH`.
+    pub fn copy_available() -> bool {
+        std::process::Command::new("wl-copy")
             .arg("--version")
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -311,10 +381,6 @@ impl ClipboardBackend for WlPasteBackend {
     async fn watch(&mut self, tx: mpsc::Sender<ClipboardEvent>) -> Result<()> {
         self.watch_impl(tx).await
     }
-
-    async fn set_selection(&self, representations: Vec<Representation>) -> Result<()> {
-        WlPasteBackend::set_selection(self, representations).await
-    }
 }
 
 /// Query the MIME types currently offered by the clipboard selection.
@@ -366,15 +432,20 @@ async fn wl_fetch(mime: &str) -> Result<Vec<u8>> {
 pub async fn run(state: Arc<AppState>) -> Result<()> {
     let (tx, rx) = mpsc::channel::<ClipboardEvent>(64);
 
-    if let Ok(mut backend) = WaylandBackend::connect() {
-        info!("using direct Wayland data-control backend");
-        tokio::spawn(async move {
-            if let Err(error) = backend.watch(tx).await {
-                error!(error = %error, "direct Wayland backend failed");
-            }
-        });
-        process_events(state, rx).await;
-        return Ok(());
+    match WaylandBackend::connect() {
+        Ok(backend) => {
+            info!(
+                protocol = backend.protocol.global_name(),
+                seat_count = backend.seat_count,
+                "direct Wayland data-control support detected, but capture is not implemented yet; using wl-paste fallback if available"
+            );
+        }
+        Err(error) => {
+            info!(
+                error = %error,
+                "direct Wayland data-control backend unavailable or incomplete; falling back if possible"
+            );
+        }
     }
 
     // wl-paste/wl-copy subprocess backend.
@@ -428,10 +499,7 @@ async fn handle_event(state: &AppState, event: ClipboardEvent) -> Result<()> {
     // rejected based on their source alone.
     {
         let filter = state.privacy_filter.read().await;
-        let pre_result = filter.check_pre_content(
-            source_app.as_deref(),
-            &offered_mimes,
-        );
+        let pre_result = filter.check_pre_content(source_app.as_deref(), &offered_mimes);
         if pre_result == FilterResult::Reject {
             debug!(
                 source_app = ?source_app,
@@ -449,8 +517,7 @@ async fn handle_event(state: &AppState, event: ClipboardEvent) -> Result<()> {
     // processor just produced.
     let ephemeral = {
         let filter = state.privacy_filter.read().await;
-        filter.check_content_patterns(processed.preview_text.as_deref())
-            == FilterResult::Ephemeral
+        filter.check_content_patterns(processed.preview_text.as_deref()) == FilterResult::Ephemeral
     };
     if ephemeral {
         debug!("privacy filter flagged content as ephemeral");
@@ -470,9 +537,10 @@ async fn handle_event(state: &AppState, event: ClipboardEvent) -> Result<()> {
     // Insert into the store (via spawn_blocking since rusqlite is !Send-safe
     // across await points when wrapped in std::sync::Mutex).
     let summary = {
-        let store = state.store.lock().map_err(|e| {
-            NixClipError::Pipeline(format!("store lock poisoned: {e}"))
-        })?;
+        let store = state
+            .store
+            .lock()
+            .map_err(|e| NixClipError::Pipeline(format!("store lock poisoned: {e}")))?;
         store.insert(new_entry)?
     };
 
@@ -508,8 +576,8 @@ async fn handle_event(state: &AppState, event: ClipboardEvent) -> Result<()> {
 
 /// Restore representations to the system clipboard.
 ///
-/// Creates a new data source with the provided MIME types and sets it as the
-/// current selection on the default seat.
+/// Uses direct Wayland data-control restore when possible so multi-MIME
+/// entries preserve their original offered representations.
 pub async fn restore_to_clipboard(representations: Vec<Representation>) -> Result<()> {
     if representations.is_empty() {
         return Err(NixClipError::Pipeline(
@@ -517,27 +585,66 @@ pub async fn restore_to_clipboard(representations: Vec<Representation>) -> Resul
         ));
     }
 
-    let reps: Vec<Representation> = representations
-        .into_iter()
-        .map(|r| Representation {
-            mime: r.mime,
-            data: r.data,
+    match restore_via_data_control(representations.clone()).await {
+        Ok(()) => {
+            info!("clipboard restored via direct Wayland data-control backend");
+            Ok(())
+        }
+        Err(error) => {
+            warn!(
+                error = %error,
+                "direct Wayland restore failed; falling back to wl-copy if available"
+            );
+            restore_via_wl_copy(representations).await
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+async fn restore_via_data_control(representations: Vec<Representation>) -> Result<()> {
+    let sources = direct_mime_sources(&representations);
+
+    tokio::task::spawn_blocking(move || {
+        let options = wl_clipboard_rs::copy::Options::new();
+        options.copy_multi(sources).map_err(|error| {
+            NixClipError::Wayland(format!("wl-clipboard-rs restore failed: {error}"))
         })
-        .collect();
+    })
+    .await
+    .map_err(|error| NixClipError::Wayland(format!("direct restore task failed: {error}")))?
+}
 
-    if let Ok(backend) = WaylandBackend::connect() {
-        return backend.set_selection(reps.clone()).await;
-    }
-
-    if WlPasteBackend::available() {
-        let backend = WlPasteBackend;
-        return backend.set_selection(reps).await;
-    }
-
+#[cfg(not(target_os = "linux"))]
+async fn restore_via_data_control(_representations: Vec<Representation>) -> Result<()> {
     Err(NixClipError::Wayland(
-        "no clipboard restore backend available; install wl-clipboard or enable direct data-control support"
-            .into(),
+        "direct Wayland restore is only available on Linux".into(),
     ))
+}
+
+#[allow(dead_code)]
+#[cfg(any(test, target_os = "linux"))]
+fn direct_mime_sources(representations: &[Representation]) -> Vec<DirectMimeSource> {
+    representations
+        .iter()
+        .map(|representation| wl_clipboard_rs::copy::MimeSource {
+            source: wl_clipboard_rs::copy::Source::Bytes(
+                representation.data.clone().into_boxed_slice(),
+            ),
+            mime_type: wl_clipboard_rs::copy::MimeType::Specific(representation.mime.clone()),
+        })
+        .collect()
+}
+
+async fn restore_via_wl_copy(representations: Vec<Representation>) -> Result<()> {
+    if !WlPasteBackend::copy_available() {
+        return Err(NixClipError::Wayland(
+            "no clipboard restore backend available; install wl-clipboard or finish the direct data-control backend"
+                .into(),
+        ));
+    }
+
+    let backend = WlPasteBackend;
+    backend.set_selection(representations).await
 }
 
 #[cfg(test)]
@@ -580,5 +687,92 @@ mod tests {
             ),
             FilterResult::Reject
         ));
+    }
+
+    #[test]
+    fn restore_backend_reports_missing_wl_copy() {
+        if cfg!(target_os = "linux") && !WlPasteBackend::copy_available() {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("runtime");
+            let err = runtime
+                .block_on(restore_via_wl_copy(vec![Representation {
+                    mime: "text/plain".into(),
+                    data: b"hello".to_vec(),
+                }]))
+                .expect_err("wl-copy should be required for fallback restore");
+            assert!(err
+                .to_string()
+                .contains("no clipboard restore backend available"));
+        }
+    }
+
+    #[test]
+    fn direct_restore_preserves_all_mime_representations() {
+        let sources = direct_mime_sources(&[
+            Representation {
+                mime: "text/plain".into(),
+                data: b"plain".to_vec(),
+            },
+            Representation {
+                mime: "text/html".into(),
+                data: b"<b>plain</b>".to_vec(),
+            },
+            Representation {
+                mime: "image/png".into(),
+                data: vec![1, 2, 3, 4],
+            },
+        ]);
+
+        let offered_mimes = sources
+            .iter()
+            .map(|source| match &source.mime_type {
+                wl_clipboard_rs::copy::MimeType::Specific(mime) => mime.as_str(),
+                other => panic!("unexpected MIME source variant: {other:?}"),
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(offered_mimes, vec!["text/plain", "text/html", "image/png"]);
+    }
+
+    #[test]
+    fn wayland_probe_prefers_ext_data_control() {
+        let probe = WaylandProbe::from_interfaces([
+            "wl_compositor",
+            "zwlr_data_control_manager_v1",
+            "ext_data_control_manager_v1",
+            "wl_seat",
+        ]);
+
+        assert_eq!(
+            probe.protocol,
+            Some(DirectDataControlProtocol::ExtDataControlV1)
+        );
+        assert_eq!(probe.seat_count, 1);
+    }
+
+    #[test]
+    fn wayland_probe_falls_back_to_wlr() {
+        let probe = WaylandProbe::from_interfaces([
+            "wl_compositor",
+            "zwlr_data_control_manager_v1",
+            "wl_seat",
+            "wl_seat",
+        ]);
+
+        assert_eq!(
+            probe.protocol,
+            Some(DirectDataControlProtocol::WlrDataControlV1)
+        );
+        assert_eq!(probe.seat_count, 2);
+    }
+
+    #[test]
+    fn wayland_probe_reports_missing_protocol() {
+        let probe = WaylandProbe::from_interfaces(["wl_compositor", "wl_seat"]);
+
+        assert_eq!(probe.protocol, None);
+        assert_eq!(probe.seat_count, 1);
     }
 }

@@ -8,9 +8,7 @@
 ///   - Sequential frame I/O
 ///   - Partial / truncated frame handling
 use nixclip_core::ipc::{
-    ClientMessage, ServerMessage,
-    encode_message, decode_message,
-    write_frame, read_frame,
+    decode_message, encode_message, read_frame, write_frame, ClientMessage, ServerMessage,
     PROTOCOL_VERSION,
 };
 use nixclip_core::{EntryId, RestoreMode};
@@ -111,7 +109,8 @@ fn all_client_variants_have_version_field() {
     for variant in &variants {
         let v = variant.version();
         assert_eq!(
-            v, PROTOCOL_VERSION,
+            v,
+            PROTOCOL_VERSION,
             "variant {:?} has version {v}, expected {PROTOCOL_VERSION}",
             std::mem::discriminant(variant)
         );
@@ -162,6 +161,8 @@ fn all_server_variants_have_version_field() {
         preview_text: Some("test".into()),
         source_app: None,
         thumbnail: None,
+        match_ranges: vec![],
+        metadata: Default::default(),
     };
 
     let variants: Vec<ServerMessage> = vec![
@@ -177,7 +178,8 @@ fn all_server_variants_have_version_field() {
     for variant in &variants {
         let v = variant.version();
         assert_eq!(
-            v, PROTOCOL_VERSION,
+            v,
+            PROTOCOL_VERSION,
             "ServerMessage variant {:?} has version {v}, expected {PROTOCOL_VERSION}",
             std::mem::discriminant(variant)
         );
@@ -198,6 +200,8 @@ fn all_server_variants_version_encoded_in_msgpack() {
         preview_text: None,
         source_app: None,
         thumbnail: None,
+        match_ranges: vec![],
+        metadata: Default::default(),
     };
 
     let variants: Vec<ServerMessage> = vec![
@@ -303,7 +307,7 @@ async fn read_frame_length_of_64mib_plus_one_is_rejected() {
 async fn multiple_sequential_frames_round_trip() {
     let payloads: &[&[u8]] = &[
         b"frame-one",
-        b"",                 // zero-length is valid
+        b"", // zero-length is valid
         b"frame-three",
         b"the fourth frame with more content",
         b"\x00\x01\x02\x03\x04\x05", // binary payload
@@ -319,17 +323,13 @@ async fn multiple_sequential_frames_round_trip() {
         let received = read_frame(&mut cursor)
             .await
             .unwrap_or_else(|e| panic!("read frame {i} failed: {e}"));
-        assert_eq!(
-            received.as_slice(),
-            *expected,
-            "frame {i} content mismatch"
-        );
+        assert_eq!(received.as_slice(), *expected, "frame {i} content mismatch");
     }
 }
 
 #[tokio::test]
 async fn sequential_send_recv_messages_round_trip() {
-    use nixclip_core::ipc::{send_message, recv_message};
+    use nixclip_core::ipc::{recv_message, send_message};
 
     let messages: Vec<ClientMessage> = vec![
         ClientMessage::subscribe(),
@@ -351,7 +351,8 @@ async fn sequential_send_recv_messages_round_trip() {
             .unwrap_or_else(|e| panic!("recv_message {i} failed: {e}"));
 
         assert_eq!(
-            received.version(), expected.version(),
+            received.version(),
+            expected.version(),
             "message {i} version mismatch"
         );
         // Check the variant discriminant matches.
@@ -460,8 +461,8 @@ fn manual_msgpack_subscribe_deserializes_correctly() {
         v
     };
 
-    let decoded: ClientMessage = decode_message(&bytes)
-        .expect("manually constructed Subscribe msgpack must decode");
+    let decoded: ClientMessage =
+        decode_message(&bytes).expect("manually constructed Subscribe msgpack must decode");
 
     assert!(
         matches!(decoded, ClientMessage::Subscribe { version: 1 }),

@@ -1,10 +1,7 @@
 /// Integration tests for IPC message encoding/decoding and the frame protocol.
 use nixclip_core::ipc::{
-    ClientMessage, ServerMessage,
-    encode_message, decode_message,
-    write_frame, read_frame,
-    send_message, recv_message,
-    PROTOCOL_VERSION,
+    decode_message, encode_message, read_frame, recv_message, send_message, write_frame,
+    ClientMessage, ServerMessage, PROTOCOL_VERSION,
 };
 use nixclip_core::{ContentClass, EntryId, RestoreMode};
 
@@ -22,23 +19,29 @@ fn client_subscribe_round_trip() {
     let bytes = encode_message(&msg).expect("encode Subscribe");
     let decoded: ClientMessage = decode_message(&bytes).expect("decode Subscribe");
     assert!(
-        matches!(decoded, ClientMessage::Subscribe { version: PROTOCOL_VERSION }),
+        matches!(
+            decoded,
+            ClientMessage::Subscribe {
+                version: PROTOCOL_VERSION
+            }
+        ),
         "decoded variant should be Subscribe with correct version"
     );
 }
 
 #[test]
 fn client_query_round_trip_with_filters() {
-    let msg = ClientMessage::query(
-        Some("search term".into()),
-        Some("text".into()),
-        5,
-        25,
-    );
+    let msg = ClientMessage::query(Some("search term".into()), Some("text".into()), 5, 25);
     let bytes = encode_message(&msg).expect("encode Query");
     let decoded: ClientMessage = decode_message(&bytes).expect("decode Query");
     match decoded {
-        ClientMessage::Query { version, text, content_class, offset, limit } => {
+        ClientMessage::Query {
+            version,
+            text,
+            content_class,
+            offset,
+            limit,
+        } => {
             assert_eq!(version, PROTOCOL_VERSION);
             assert_eq!(text.as_deref(), Some("search term"));
             assert_eq!(content_class.as_deref(), Some("text"));
@@ -55,7 +58,13 @@ fn client_query_round_trip_no_filters() {
     let bytes = encode_message(&msg).expect("encode Query no-filters");
     let decoded: ClientMessage = decode_message(&bytes).expect("decode Query no-filters");
     match decoded {
-        ClientMessage::Query { text, content_class, offset, limit, .. } => {
+        ClientMessage::Query {
+            text,
+            content_class,
+            offset,
+            limit,
+            ..
+        } => {
             assert!(text.is_none());
             assert!(content_class.is_none());
             assert_eq!(offset, 0);
@@ -72,7 +81,11 @@ fn client_restore_round_trip() {
     let bytes = encode_message(&msg).expect("encode Restore");
     let decoded: ClientMessage = decode_message(&bytes).expect("decode Restore");
     match decoded {
-        ClientMessage::Restore { version, id: decoded_id, mode } => {
+        ClientMessage::Restore {
+            version,
+            id: decoded_id,
+            mode,
+        } => {
             assert_eq!(version, PROTOCOL_VERSION);
             assert_eq!(decoded_id, id);
             assert_eq!(mode, RestoreMode::PlainText);
@@ -99,7 +112,9 @@ fn client_delete_round_trip() {
     let bytes = encode_message(&msg).expect("encode Delete");
     let decoded: ClientMessage = decode_message(&bytes).expect("decode Delete");
     match decoded {
-        ClientMessage::Delete { ids: decoded_ids, .. } => {
+        ClientMessage::Delete {
+            ids: decoded_ids, ..
+        } => {
             assert_eq!(decoded_ids, ids);
         }
         other => panic!("expected Delete, got {other:?}"),
@@ -150,7 +165,12 @@ fn client_clear_unpinned_round_trip() {
     let msg = ClientMessage::clear_unpinned();
     let bytes = encode_message(&msg).expect("encode ClearUnpinned");
     let decoded: ClientMessage = decode_message(&bytes).expect("decode ClearUnpinned");
-    assert!(matches!(decoded, ClientMessage::ClearUnpinned { version: PROTOCOL_VERSION }));
+    assert!(matches!(
+        decoded,
+        ClientMessage::ClearUnpinned {
+            version: PROTOCOL_VERSION
+        }
+    ));
 }
 
 #[test]
@@ -158,7 +178,12 @@ fn client_get_config_round_trip() {
     let msg = ClientMessage::get_config();
     let bytes = encode_message(&msg).expect("encode GetConfig");
     let decoded: ClientMessage = decode_message(&bytes).expect("decode GetConfig");
-    assert!(matches!(decoded, ClientMessage::GetConfig { version: PROTOCOL_VERSION }));
+    assert!(matches!(
+        decoded,
+        ClientMessage::GetConfig {
+            version: PROTOCOL_VERSION
+        }
+    ));
 }
 
 #[test]
@@ -186,8 +211,14 @@ fn client_version_accessor_all_variants() {
     assert_eq!(ClientMessage::subscribe().version(), PROTOCOL_VERSION);
     assert_eq!(ClientMessage::clear_unpinned().version(), PROTOCOL_VERSION);
     assert_eq!(ClientMessage::get_config().version(), PROTOCOL_VERSION);
-    assert_eq!(ClientMessage::query(None, None, 0, 10).version(), PROTOCOL_VERSION);
-    assert_eq!(ClientMessage::restore(1, RestoreMode::Original).version(), PROTOCOL_VERSION);
+    assert_eq!(
+        ClientMessage::query(None, None, 0, 10).version(),
+        PROTOCOL_VERSION
+    );
+    assert_eq!(
+        ClientMessage::restore(1, RestoreMode::Original).version(),
+        PROTOCOL_VERSION
+    );
     assert_eq!(ClientMessage::delete(vec![]).version(), PROTOCOL_VERSION);
     assert_eq!(ClientMessage::pin(1, true).version(), PROTOCOL_VERSION);
     let patch = toml::Value::Boolean(false);
@@ -203,7 +234,12 @@ fn server_ok_round_trip() {
     let msg = ServerMessage::ok();
     let bytes = encode_message(&msg).expect("encode Ok");
     let decoded: ServerMessage = decode_message(&bytes).expect("decode Ok");
-    assert!(matches!(decoded, ServerMessage::Ok { version: PROTOCOL_VERSION }));
+    assert!(matches!(
+        decoded,
+        ServerMessage::Ok {
+            version: PROTOCOL_VERSION
+        }
+    ));
 }
 
 #[test]
@@ -275,6 +311,8 @@ fn server_query_result_round_trip() {
         preview_text: Some("hello".to_string()),
         source_app: None,
         thumbnail: None,
+        match_ranges: vec![],
+        metadata: Default::default(),
     };
     let msg = ServerMessage::query_result(vec![summary], 1);
     let bytes = encode_message(&msg).expect("encode QueryResult");
@@ -302,6 +340,8 @@ fn server_new_entry_round_trip() {
         preview_text: Some("https://example.com".to_string()),
         source_app: Some("org.test.App".to_string()),
         thumbnail: None,
+        match_ranges: vec![],
+        metadata: Default::default(),
     };
     let msg = ServerMessage::new_entry(summary.clone());
     let bytes = encode_message(&msg).expect("encode NewEntry");
@@ -358,7 +398,10 @@ async fn zero_length_frame_is_valid() {
 
     let mut cursor = std::io::Cursor::new(buf);
     let received = read_frame(&mut cursor).await.expect("read empty frame");
-    assert!(received.is_empty(), "zero-length frame should return empty vec");
+    assert!(
+        received.is_empty(),
+        "zero-length frame should return empty vec"
+    );
 }
 
 #[tokio::test]
@@ -366,7 +409,9 @@ async fn read_frame_clean_eof_returns_ipc_error() {
     // Completely empty reader — peer closed before writing anything.
     let buf: Vec<u8> = Vec::new();
     let mut cursor = std::io::Cursor::new(buf);
-    let err = read_frame(&mut cursor).await.expect_err("should fail on EOF");
+    let err = read_frame(&mut cursor)
+        .await
+        .expect_err("should fail on EOF");
     assert!(
         matches!(&err, nixclip_core::NixClipError::Ipc(s) if s.contains("connection closed")),
         "unexpected error: {err}"
@@ -380,7 +425,9 @@ async fn read_frame_rejects_oversized_length_header() {
     let buf = oversized.to_be_bytes().to_vec();
 
     let mut cursor = std::io::Cursor::new(buf);
-    let err = read_frame(&mut cursor).await.expect_err("should fail on oversized");
+    let err = read_frame(&mut cursor)
+        .await
+        .expect_err("should fail on oversized");
     assert!(
         matches!(&err, nixclip_core::NixClipError::Ipc(s) if s.contains("frame too large")),
         "unexpected error: {err}"
@@ -391,7 +438,9 @@ async fn read_frame_rejects_oversized_length_header() {
 async fn write_frame_rejects_oversized_payload() {
     let big: Vec<u8> = vec![0u8; 64 * 1024 * 1024 + 1];
     let mut buf: Vec<u8> = Vec::new();
-    let err = write_frame(&mut buf, &big).await.expect_err("should reject big payload");
+    let err = write_frame(&mut buf, &big)
+        .await
+        .expect_err("should reject big payload");
     assert!(
         matches!(&err, nixclip_core::NixClipError::Ipc(s) if s.contains("frame too large")),
         "unexpected error: {err}"
@@ -405,7 +454,9 @@ async fn read_frame_truncated_payload_is_io_error() {
     buf.extend_from_slice(&[0u8; 10]);
 
     let mut cursor = std::io::Cursor::new(buf);
-    let err = read_frame(&mut cursor).await.expect_err("truncated payload should error");
+    let err = read_frame(&mut cursor)
+        .await
+        .expect_err("truncated payload should error");
     // UnexpectedEof from read_exact → NixClipError::Io
     assert!(
         matches!(err, nixclip_core::NixClipError::Io(_)),
@@ -444,7 +495,9 @@ async fn send_recv_client_message_round_trip() {
     let received: ClientMessage = recv_message(&mut cursor).await.expect("recv_message");
     assert!(matches!(
         received,
-        ClientMessage::ClearUnpinned { version: PROTOCOL_VERSION }
+        ClientMessage::ClearUnpinned {
+            version: PROTOCOL_VERSION
+        }
     ));
 }
 
@@ -456,7 +509,12 @@ async fn send_recv_server_message_round_trip() {
 
     let mut cursor = std::io::Cursor::new(buf);
     let received: ServerMessage = recv_message(&mut cursor).await.expect("recv_message");
-    assert!(matches!(received, ServerMessage::Ok { version: PROTOCOL_VERSION }));
+    assert!(matches!(
+        received,
+        ServerMessage::Ok {
+            version: PROTOCOL_VERSION
+        }
+    ));
 }
 
 #[tokio::test]
@@ -501,7 +559,9 @@ async fn duplex_bidirectional_messages() {
 
     // Client sends a query.
     let query = ClientMessage::query(Some("test".into()), None, 0, 10);
-    send_message(&mut client, &query).await.expect("client send");
+    send_message(&mut client, &query)
+        .await
+        .expect("client send");
 
     // Server receives the query.
     let received: ClientMessage = recv_message(&mut server).await.expect("server recv");
@@ -509,7 +569,9 @@ async fn duplex_bidirectional_messages() {
 
     // Server replies.
     let reply = ServerMessage::ok();
-    send_message(&mut server, &reply).await.expect("server send");
+    send_message(&mut server, &reply)
+        .await
+        .expect("server send");
 
     // Client receives the reply.
     let server_reply: ServerMessage = recv_message(&mut client).await.expect("client recv");

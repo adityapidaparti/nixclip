@@ -125,15 +125,9 @@ async fn run() -> Result<()> {
     // -----------------------------------------------------------------------
     // Ensure data directories exist
     // -----------------------------------------------------------------------
-    std::fs::create_dir_all(Config::data_dir()).map_err(|e| {
-        nixclip_core::NixClipError::Io(e)
-    })?;
-    std::fs::create_dir_all(&blob_dir).map_err(|e| {
-        nixclip_core::NixClipError::Io(e)
-    })?;
-    std::fs::create_dir_all(Config::config_dir()).map_err(|e| {
-        nixclip_core::NixClipError::Io(e)
-    })?;
+    std::fs::create_dir_all(Config::data_dir()).map_err(nixclip_core::NixClipError::Io)?;
+    std::fs::create_dir_all(&blob_dir).map_err(nixclip_core::NixClipError::Io)?;
+    std::fs::create_dir_all(Config::config_dir()).map_err(nixclip_core::NixClipError::Io)?;
 
     // -----------------------------------------------------------------------
     // Open ClipStore
@@ -261,7 +255,8 @@ fn init_tracing(verbose: bool) {
     use tracing_subscriber::EnvFilter;
 
     let default_filter = if verbose { "debug" } else { "info" };
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_filter));
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_filter));
 
     tracing_subscriber::fmt()
         .json()

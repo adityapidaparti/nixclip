@@ -25,6 +25,7 @@ fn insert_text(store: &ClipStore, seed: u8, preview: &str) -> nixclip_core::Entr
         }],
         source_app: None,
         ephemeral: false,
+        metadata: Default::default(),
     };
     store.insert(entry).expect("insert").expect("new entry id")
 }
@@ -43,8 +44,12 @@ fn insert_url(store: &ClipStore, seed: u8, url: &str) -> nixclip_core::EntryId {
         }],
         source_app: None,
         ephemeral: false,
+        metadata: Default::default(),
     };
-    store.insert(entry).expect("insert url").expect("new entry id")
+    store
+        .insert(entry)
+        .expect("insert url")
+        .expect("new entry id")
 }
 
 /// Create an isolated store + search engine pair.
@@ -89,7 +94,11 @@ fn fts_single_word_match() {
 
     let result = engine.search("quick", None, 0, 10).expect("search");
     assert_eq!(result.total, 1, "should match exactly one entry");
-    assert!(result.entries[0].preview_text.as_deref().unwrap().contains("quick"));
+    assert!(result.entries[0]
+        .preview_text
+        .as_deref()
+        .unwrap()
+        .contains("quick"));
 }
 
 #[test]
@@ -108,7 +117,9 @@ fn fts_no_match_returns_empty() {
     let (store, engine, _dir) = setup();
     insert_text(&store, 1, "hello world");
 
-    let result = engine.search("zzzznonexistent", None, 0, 10).expect("search");
+    let result = engine
+        .search("zzzznonexistent", None, 0, 10)
+        .expect("search");
     assert_eq!(result.total, 0);
     assert!(result.entries.is_empty());
 }
@@ -123,7 +134,8 @@ fn fts_prefix_matching() {
     let result = engine.search("Ru", None, 0, 10).expect("search");
     assert!(
         result.total >= 1,
-        "prefix match should find at least one entry; total={}", result.total
+        "prefix match should find at least one entry; total={}",
+        result.total
     );
 }
 
@@ -202,7 +214,11 @@ fn search_with_text_and_class_filter() {
         .expect("search filtered");
     assert_eq!(result.total, 1);
     assert_eq!(result.entries[0].content_class, ContentClass::Text);
-    assert!(result.entries[0].preview_text.as_deref().unwrap().contains("rust"));
+    assert!(result.entries[0]
+        .preview_text
+        .as_deref()
+        .unwrap()
+        .contains("rust"));
 }
 
 // ===========================================================================
@@ -247,7 +263,9 @@ fn search_offset_beyond_total_returns_empty_entries() {
     let (store, engine, _dir) = setup();
     insert_text(&store, 1, "only entry");
 
-    let result = engine.search("", None, 100, 10).expect("offset beyond total");
+    let result = engine
+        .search("", None, 100, 10)
+        .expect("offset beyond total");
     assert_eq!(result.total, 1, "total should still reflect the full count");
     assert!(result.entries.is_empty(), "but entries should be empty");
 }
@@ -295,7 +313,10 @@ fn search_with_fts_special_chars_does_not_panic() {
         "a AND b OR c",
     ] {
         let result = engine.search(query, None, 0, 10);
-        assert!(result.is_ok(), "search with FTS special chars should not error: {query:?}");
+        assert!(
+            result.is_ok(),
+            "search with FTS special chars should not error: {query:?}"
+        );
     }
 }
 
@@ -342,6 +363,7 @@ fn search_results_include_source_app() {
         }],
         source_app: Some("org.test.Editor".to_string()),
         ephemeral: false,
+        metadata: Default::default(),
     };
     store.insert(entry).expect("insert");
 

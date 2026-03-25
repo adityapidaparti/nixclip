@@ -6,7 +6,7 @@ use rusqlite::params;
 use crate::config::GeneralConfig;
 use crate::error::Result;
 use crate::{
-    ContentClass, EntryMetadata, EntrySummary, EntryId, NewEntry, PruneStats, Query, QueryResult,
+    ContentClass, EntryId, EntryMetadata, EntrySummary, NewEntry, PruneStats, Query, QueryResult,
     Representation, StoreStats,
 };
 
@@ -142,8 +142,7 @@ impl ClipStore {
             } else {
                 // Blob storage.
                 let blob_hash = blake3::hash(&rep.data);
-                let rel_path =
-                    self.blob_store.store(blob_hash.as_bytes(), &rep.data)?;
+                let rel_path = self.blob_store.store(blob_hash.as_bytes(), &rep.data)?;
                 tx.execute(
                     "INSERT INTO representations (entry_id, mime, data, blob_path)
                      VALUES (?1, ?2, NULL, ?3)",
@@ -176,8 +175,7 @@ impl ClipStore {
         if let Some(ref text) = q.text {
             if !text.is_empty() {
                 conditions.push(
-                    "e.id IN (SELECT rowid FROM search_idx WHERE search_idx MATCH ?)"
-                        .to_string(),
+                    "e.id IN (SELECT rowid FROM search_idx WHERE search_idx MATCH ?)".to_string(),
                 );
                 // Quote the user text to prevent FTS5 syntax errors.
                 filter_values.push(Box::new(format!("\"{}\"", text.replace('"', "\"\""))));
@@ -264,9 +262,9 @@ impl ClipStore {
 
     /// Get all representations for an entry, resolving blob paths to data.
     pub fn get_representations(&self, id: EntryId) -> Result<Vec<Representation>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT mime, data, blob_path FROM representations WHERE entry_id = ?1",
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT mime, data, blob_path FROM representations WHERE entry_id = ?1")?;
 
         let rows = stmt.query_map(params![id], |row| {
             let mime: String = row.get(0)?;
@@ -362,7 +360,8 @@ impl ClipStore {
              WHERE e.pinned = 0 AND r.blob_path IS NOT NULL",
         )?;
 
-        self.conn.execute("DELETE FROM entries WHERE pinned = 0", [])?;
+        self.conn
+            .execute("DELETE FROM entries WHERE pinned = 0", [])?;
 
         for path in &blob_paths {
             let _ = self.blob_store.delete(path);
@@ -385,8 +384,7 @@ impl ClipStore {
 
         // 1. Delete entries past the retention window.
         if let Some(duration) = config.retention.to_duration() {
-            let cutoff = chrono::Utc::now().timestamp_millis()
-                - duration.num_milliseconds();
+            let cutoff = chrono::Utc::now().timestamp_millis() - duration.num_milliseconds();
 
             let expired_ids = self.collect_ids(
                 "SELECT id FROM entries WHERE last_seen_at < ?1 AND pinned = 0",
@@ -398,11 +396,11 @@ impl ClipStore {
                 let count = expired_ids.len() as u32;
 
                 let placeholders = placeholders(expired_ids.len());
-                let sql = format!(
-                    "DELETE FROM entries WHERE id IN ({placeholders})"
-                );
-                let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-                    expired_ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+                let sql = format!("DELETE FROM entries WHERE id IN ({placeholders})");
+                let param_refs: Vec<&dyn rusqlite::types::ToSql> = expired_ids
+                    .iter()
+                    .map(|id| id as &dyn rusqlite::types::ToSql)
+                    .collect();
                 self.conn.execute(&sql, param_refs.as_slice())?;
 
                 for path in &blob_paths {
@@ -418,11 +416,9 @@ impl ClipStore {
         }
 
         // 2. Enforce max_entries by deleting the oldest non-pinned entries.
-        let total_count: u32 = self.conn.query_row(
-            "SELECT COUNT(*) FROM entries",
-            [],
-            |row| row.get(0),
-        )?;
+        let total_count: u32 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM entries", [], |row| row.get(0))?;
 
         if total_count > config.max_entries {
             let excess = total_count - config.max_entries;
@@ -436,11 +432,11 @@ impl ClipStore {
                 let count = overflow_ids.len() as u32;
 
                 let placeholders = placeholders(overflow_ids.len());
-                let sql = format!(
-                    "DELETE FROM entries WHERE id IN ({placeholders})"
-                );
-                let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-                    overflow_ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+                let sql = format!("DELETE FROM entries WHERE id IN ({placeholders})");
+                let param_refs: Vec<&dyn rusqlite::types::ToSql> = overflow_ids
+                    .iter()
+                    .map(|id| id as &dyn rusqlite::types::ToSql)
+                    .collect();
                 self.conn.execute(&sql, param_refs.as_slice())?;
 
                 for path in &blob_paths {
@@ -484,8 +480,7 @@ impl ClipStore {
         let mut blobs_deleted: u32 = 0;
         let mut bytes_freed: u64 = 0;
 
-        let cutoff = chrono::Utc::now().timestamp_millis()
-            - (ttl_hours as i64) * 3_600_000;
+        let cutoff = chrono::Utc::now().timestamp_millis() - (ttl_hours as i64) * 3_600_000;
 
         let expired_ids = self.collect_ids(
             "SELECT id FROM entries WHERE ephemeral = 1 AND created_at < ?1",
@@ -498,8 +493,10 @@ impl ClipStore {
 
             let ph = placeholders(expired_ids.len());
             let sql = format!("DELETE FROM entries WHERE id IN ({ph})");
-            let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-                expired_ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+            let param_refs: Vec<&dyn rusqlite::types::ToSql> = expired_ids
+                .iter()
+                .map(|id| id as &dyn rusqlite::types::ToSql)
+                .collect();
             self.conn.execute(&sql, param_refs.as_slice())?;
 
             for path in &blob_paths {
@@ -531,11 +528,9 @@ impl ClipStore {
 
     /// Gather high-level storage statistics.
     pub fn stats(&self) -> Result<StoreStats> {
-        let entry_count: u64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM entries",
-            [],
-            |row| row.get(0),
-        )?;
+        let entry_count: u64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM entries", [], |row| row.get(0))?;
 
         let blob_size_bytes = self.blob_store.total_size()?;
 
@@ -617,12 +612,13 @@ impl ClipStore {
 
     /// Load the thumbnail representation for an entry, if one exists.
     fn load_thumbnail(&self, id: EntryId) -> Option<Vec<u8>> {
-        let result: std::result::Result<(Option<Vec<u8>>, Option<String>), _> = self.conn.query_row(
-            "SELECT data, blob_path FROM representations
+        let result: std::result::Result<(Option<Vec<u8>>, Option<String>), _> =
+            self.conn.query_row(
+                "SELECT data, blob_path FROM representations
              WHERE entry_id = ?1 AND mime = 'image/thumbnail'",
-            params![id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        );
+                params![id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            );
 
         match result {
             Ok((Some(data), _)) => Some(data),
@@ -662,8 +658,10 @@ impl ClipStore {
             "SELECT blob_path FROM representations WHERE entry_id IN ({ph}) AND blob_path IS NOT NULL"
         );
         let mut stmt = conn.prepare(&sql)?;
-        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-            ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> = ids
+            .iter()
+            .map(|id| id as &dyn rusqlite::types::ToSql)
+            .collect();
         let rows = stmt.query_map(param_refs.as_slice(), |row| row.get(0))?;
         let mut paths = Vec::new();
         for r in rows {
@@ -700,9 +698,9 @@ impl ClipStore {
 
     /// Build the set of all blob paths currently referenced by the database.
     fn all_blob_paths(&self) -> Result<HashSet<String>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT blob_path FROM representations WHERE blob_path IS NOT NULL",
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT blob_path FROM representations WHERE blob_path IS NOT NULL")?;
         let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
         let mut set = HashSet::new();
         for r in rows {
@@ -738,9 +736,7 @@ impl ClipStore {
 ///   8: image_width, 9: image_height, 10: file_count, 11: url_domain
 fn row_to_summary_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<EntrySummary> {
     let class_str: String = row.get(5)?;
-    let content_class: ContentClass = class_str
-        .parse()
-        .unwrap_or(ContentClass::Text);
+    let content_class: ContentClass = class_str.parse().unwrap_or(ContentClass::Text);
 
     let image_width: Option<u32> = row.get(8)?;
     let image_height: Option<u32> = row.get(9)?;

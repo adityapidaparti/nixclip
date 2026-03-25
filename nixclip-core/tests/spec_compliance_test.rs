@@ -32,12 +32,12 @@
 // ERRORS (error.rs)
 //   - All eight NixClipError variants exist and carry the right payload types
 
+use nixclip_core::config::{Config, Retention};
+use nixclip_core::error::NixClipError;
 use nixclip_core::{
     ContentClass, EntryId, EntryMetadata, EntrySummary, MimePayload, NewEntry, ProcessedEntry,
     PruneStats, Query, QueryResult, Representation, RestoreMode, StoreStats,
 };
-use nixclip_core::config::{Config, Retention};
-use nixclip_core::error::NixClipError;
 
 // ===========================================================================
 // EntryId
@@ -74,21 +74,21 @@ fn content_class_has_all_five_variants() {
 
 #[test]
 fn content_class_display_lowercase() {
-    assert_eq!(ContentClass::Text.to_string(),     "text");
+    assert_eq!(ContentClass::Text.to_string(), "text");
     assert_eq!(ContentClass::RichText.to_string(), "richtext");
-    assert_eq!(ContentClass::Image.to_string(),    "image");
-    assert_eq!(ContentClass::Files.to_string(),    "files");
-    assert_eq!(ContentClass::Url.to_string(),      "url");
+    assert_eq!(ContentClass::Image.to_string(), "image");
+    assert_eq!(ContentClass::Files.to_string(), "files");
+    assert_eq!(ContentClass::Url.to_string(), "url");
 }
 
 #[test]
 fn content_class_from_str_roundtrip() {
     for (s, expected) in [
-        ("text",     ContentClass::Text),
+        ("text", ContentClass::Text),
         ("richtext", ContentClass::RichText),
-        ("image",    ContentClass::Image),
-        ("files",    ContentClass::Files),
-        ("url",      ContentClass::Url),
+        ("image", ContentClass::Image),
+        ("files", ContentClass::Files),
+        ("url", ContentClass::Url),
     ] {
         let parsed: ContentClass = s.parse().expect("FromStr should succeed for valid input");
         assert_eq!(parsed, expected, "FromStr failed for '{s}'");
@@ -109,14 +109,17 @@ fn content_class_from_str_unknown_is_error() {
 fn content_class_serde_lowercase() {
     // Spec: serde(rename_all = "lowercase")
     for (variant, expected_json) in [
-        (ContentClass::Text,     r#""text""#),
+        (ContentClass::Text, r#""text""#),
         (ContentClass::RichText, r#""richtext""#),
-        (ContentClass::Image,    r#""image""#),
-        (ContentClass::Files,    r#""files""#),
-        (ContentClass::Url,      r#""url""#),
+        (ContentClass::Image, r#""image""#),
+        (ContentClass::Files, r#""files""#),
+        (ContentClass::Url, r#""url""#),
     ] {
         let serialized = serde_json::to_string(&variant).expect("serialize ContentClass");
-        assert_eq!(serialized, expected_json, "serde serialize wrong for {variant:?}");
+        assert_eq!(
+            serialized, expected_json,
+            "serde serialize wrong for {variant:?}"
+        );
 
         let deserialized: ContentClass =
             serde_json::from_str(&serialized).expect("deserialize ContentClass");
@@ -180,6 +183,7 @@ fn new_entry_has_all_required_fields() {
         }],
         source_app: Some("gedit".to_string()),
         ephemeral: false,
+        metadata: Default::default(),
     };
 
     assert_eq!(entry.content_class, ContentClass::Text);
@@ -199,6 +203,7 @@ fn new_entry_optional_fields_accept_none() {
         representations: vec![],
         source_app: None,
         ephemeral: true,
+        metadata: Default::default(),
     };
     assert!(entry.preview_text.is_none());
     assert!(entry.source_app.is_none());
@@ -217,6 +222,7 @@ fn new_entry_canonical_hash_is_32_bytes() {
         representations: vec![],
         source_app: None,
         ephemeral: false,
+        metadata: Default::default(),
     };
     let _: [u8; 32] = entry.canonical_hash; // type assertion
 }
@@ -233,6 +239,7 @@ fn new_entry_serde_roundtrip() {
         }],
         source_app: None,
         ephemeral: false,
+        metadata: Default::default(),
     };
     let json = serde_json::to_string(&entry).expect("serialize NewEntry");
     let back: NewEntry = serde_json::from_str(&json).expect("deserialize NewEntry");
@@ -248,7 +255,7 @@ fn new_entry_serde_roundtrip() {
 fn entry_summary_fields_and_types() {
     let summary = EntrySummary {
         id: 42,
-        created_at: 1_700_000_000_000_i64,   // unix millis
+        created_at: 1_700_000_000_000_i64, // unix millis
         last_seen_at: 1_700_000_001_000_i64,
         pinned: true,
         ephemeral: false,
@@ -256,12 +263,14 @@ fn entry_summary_fields_and_types() {
         preview_text: Some("bold text".to_string()),
         source_app: Some("libreoffice".to_string()),
         thumbnail: Some(vec![0xFF, 0xD8, 0xFF]), // fake JPEG magic bytes
+        match_ranges: vec![],
+        metadata: Default::default(),
     };
 
     let id: EntryId = summary.id; // EntryId type check
     assert_eq!(id, 42);
-    let _created: i64 = summary.created_at;   // must be i64 (unix millis)
-    let _seen: i64   = summary.last_seen_at;  // must be i64
+    let _created: i64 = summary.created_at; // must be i64 (unix millis)
+    let _seen: i64 = summary.last_seen_at; // must be i64
     assert!(summary.pinned);
     assert!(!summary.ephemeral);
     assert_eq!(summary.content_class, ContentClass::RichText);
@@ -281,6 +290,8 @@ fn entry_summary_optional_fields_accept_none() {
         preview_text: None,
         source_app: None,
         thumbnail: None,
+        match_ranges: vec![],
+        metadata: Default::default(),
     };
     assert!(summary.preview_text.is_none());
     assert!(summary.source_app.is_none());
@@ -299,6 +310,8 @@ fn entry_summary_serde_roundtrip() {
         preview_text: None,
         source_app: None,
         thumbnail: Some(vec![1, 2, 3]),
+        match_ranges: vec![],
+        metadata: Default::default(),
     };
     let json = serde_json::to_string(&summary).expect("serialize EntrySummary");
     let back: EntrySummary = serde_json::from_str(&json).expect("deserialize EntrySummary");
@@ -337,7 +350,7 @@ fn query_fields_and_types() {
         limit: 20u32,
     };
     let _offset: u32 = q.offset;
-    let _limit: u32  = q.limit;
+    let _limit: u32 = q.limit;
     assert_eq!(q.text.as_deref(), Some("clipboard"));
     assert_eq!(q.content_class, Some(ContentClass::Text));
 }
@@ -450,9 +463,12 @@ fn processed_entry_optional_thumbnail() {
 #[test]
 fn entry_metadata_default_is_all_none() {
     let m = EntryMetadata::default();
-    assert!(m.image_dimensions.is_none(), "image_dimensions should default to None");
-    assert!(m.file_count.is_none(),       "file_count should default to None");
-    assert!(m.url_domain.is_none(),       "url_domain should default to None");
+    assert!(
+        m.image_dimensions.is_none(),
+        "image_dimensions should default to None"
+    );
+    assert!(m.file_count.is_none(), "file_count should default to None");
+    assert!(m.url_domain.is_none(), "url_domain should default to None");
 }
 
 #[test]
@@ -499,7 +515,7 @@ fn store_stats_field_types() {
         blob_size_bytes: 10_485_760u64,
         db_size_bytes: 4_096u64,
     };
-    let _ec:  u64 = s.entry_count;
+    let _ec: u64 = s.entry_count;
     let _bsb: u64 = s.blob_size_bytes;
     let _dsb: u64 = s.db_size_bytes;
     assert_eq!(s.entry_count, 500);
@@ -545,12 +561,12 @@ fn general_config_default_retention_is_3months() {
 #[test]
 fn retention_all_variants_serialise_to_spec_strings() {
     let cases: &[(Retention, &str)] = &[
-        (Retention::Days7,    "\"7days\""),
-        (Retention::Days30,   "\"30days\""),
-        (Retention::Months3,  "\"3months\""),
-        (Retention::Months6,  "\"6months\""),
-        (Retention::Year1,    "\"1year\""),
-        (Retention::Unlimited,"\"unlimited\""),
+        (Retention::Days7, "\"7days\""),
+        (Retention::Days30, "\"30days\""),
+        (Retention::Months3, "\"3months\""),
+        (Retention::Months6, "\"6months\""),
+        (Retention::Year1, "\"1year\""),
+        (Retention::Unlimited, "\"unlimited\""),
     ];
     for (variant, expected_json) in cases {
         let got = serde_json::to_string(variant).expect("serialize Retention");
@@ -561,12 +577,12 @@ fn retention_all_variants_serialise_to_spec_strings() {
 #[test]
 fn retention_all_spec_strings_deserialise() {
     let cases: &[(&str, Retention)] = &[
-        ("\"7days\"",    Retention::Days7),
-        ("\"30days\"",   Retention::Days30),
-        ("\"3months\"",  Retention::Months3),
-        ("\"6months\"",  Retention::Months6),
-        ("\"1year\"",    Retention::Year1),
-        ("\"unlimited\"",Retention::Unlimited),
+        ("\"7days\"", Retention::Days7),
+        ("\"30days\"", Retention::Days30),
+        ("\"3months\"", Retention::Months3),
+        ("\"6months\"", Retention::Months6),
+        ("\"1year\"", Retention::Year1),
+        ("\"unlimited\"", Retention::Unlimited),
     ];
     for (json, expected) in cases {
         let got: Retention = serde_json::from_str(json).expect("deserialize Retention");
@@ -581,12 +597,15 @@ fn retention_all_spec_strings_deserialise() {
 #[test]
 fn ui_config_defaults_match_spec() {
     let ui = Config::default().ui;
-    assert_eq!(ui.theme,               "auto");
-    assert_eq!(ui.width,               680u32);
+    assert_eq!(ui.theme, "auto");
+    assert_eq!(ui.width, 680u32);
     assert_eq!(ui.max_visible_entries, 8u32);
-    assert!(ui.show_source_app,   "show_source_app must default to true");
-    assert!(ui.show_content_badges, "show_content_badges must default to true");
-    assert_eq!(ui.position,           "top-center");
+    assert!(ui.show_source_app, "show_source_app must default to true");
+    assert!(
+        ui.show_content_badges,
+        "show_content_badges must default to true"
+    );
+    assert_eq!(ui.position, "top-center");
 }
 
 // ===========================================================================
@@ -596,12 +615,12 @@ fn ui_config_defaults_match_spec() {
 #[test]
 fn keybind_config_defaults_match_spec() {
     let kb = Config::default().keybind;
-    assert_eq!(kb.toggle,           "Super+Shift+V");
+    assert_eq!(kb.toggle, "Super+Shift+V");
     assert_eq!(kb.restore_original, "Return");
-    assert_eq!(kb.restore_plain,    "Shift+Return");
-    assert_eq!(kb.delete,           "Ctrl+BackSpace");
-    assert_eq!(kb.pin,              "Ctrl+P");
-    assert_eq!(kb.clear_all,        "Ctrl+Shift+Delete");
+    assert_eq!(kb.restore_plain, "Shift+Return");
+    assert_eq!(kb.delete, "Ctrl+BackSpace");
+    assert_eq!(kb.pin, "Ctrl+P");
+    assert_eq!(kb.clear_all, "Ctrl+Shift+Delete");
 }
 
 // ===========================================================================
@@ -803,7 +822,10 @@ fn error_variant_database_from_rusqlite_error() {
     // database connection.
     use rusqlite::ffi;
     let sqlite_err = rusqlite::Error::SqliteFailure(
-        ffi::Error { code: ffi::ErrorCode::Unknown, extended_code: 1 },
+        ffi::Error {
+            code: ffi::ErrorCode::Unknown,
+            extended_code: 1,
+        },
         Some("disk I/O error".to_string()),
     );
     let e: NixClipError = sqlite_err.into();

@@ -14,6 +14,7 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
 use nixclip_core::config::{GeneralConfig, Retention};
+use nixclip_core::storage::schema::SCHEMA_VERSION;
 use nixclip_core::storage::{BlobStore, ClipStore};
 use nixclip_core::{ContentClass, MimePayload, NewEntry, Query};
 
@@ -37,6 +38,7 @@ fn make_entry(seed: u8, class: ContentClass, preview: &str) -> NewEntry {
         }],
         source_app: None,
         ephemeral: false,
+        metadata: Default::default(),
     }
 }
 
@@ -55,6 +57,7 @@ fn make_entry_with_data(seed: u8, data: Vec<u8>, mime: &str) -> NewEntry {
         }],
         source_app: None,
         ephemeral: false,
+        metadata: Default::default(),
     }
 }
 
@@ -103,8 +106,14 @@ fn atomic_blob_write_creates_final_path_and_no_leftover_tmp() {
     let expected_abs = blob_dir.join(&expected_rel);
 
     let rel = store.store(&hash, &data).expect("store");
-    assert_eq!(rel, expected_rel, "returned relative path should match expected pattern");
-    assert!(expected_abs.exists(), "final blob file should exist after store()");
+    assert_eq!(
+        rel, expected_rel,
+        "returned relative path should match expected pattern"
+    );
+    assert!(
+        expected_abs.exists(),
+        "final blob file should exist after store()"
+    );
 
     // (b-cont) No leftover temp files remain after a clean write.
     let tmp_leftovers: Vec<_> = std::fs::read_dir(blob_dir.join(".tmp"))
@@ -114,7 +123,10 @@ fn atomic_blob_write_creates_final_path_and_no_leftover_tmp() {
     assert!(
         tmp_leftovers.is_empty(),
         "no temp files should remain after a successful write, found: {:?}",
-        tmp_leftovers.iter().map(|e| e.file_name()).collect::<Vec<_>>()
+        tmp_leftovers
+            .iter()
+            .map(|e| e.file_name())
+            .collect::<Vec<_>>()
     );
 
     // (c) Round-trip the data.
@@ -144,8 +156,16 @@ fn blob_path_uses_two_level_directory_structure() {
     // Relative path must be exactly `{first4hex}/{full64hex}`.
     let parts: Vec<&str> = rel.splitn(2, '/').collect();
     assert_eq!(parts.len(), 2, "path must have exactly two components");
-    assert_eq!(parts[0], &hex[..4], "prefix directory must be first 4 hex chars");
-    assert_eq!(parts[1], hex.as_str(), "file name must be the full hex string");
+    assert_eq!(
+        parts[0],
+        &hex[..4],
+        "prefix directory must be first 4 hex chars"
+    );
+    assert_eq!(
+        parts[1],
+        hex.as_str(),
+        "file name must be the full hex string"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -159,11 +179,19 @@ fn fts_rebuild_removes_stale_terms_and_preserves_live_terms() {
     let (store, _dir) = open_temp_store();
 
     let id_live = store
-        .insert(make_entry(1, ContentClass::Text, "persistent rainbow unicorn"))
+        .insert(make_entry(
+            1,
+            ContentClass::Text,
+            "persistent rainbow unicorn",
+        ))
         .expect("insert live")
         .unwrap();
     let id_dead = store
-        .insert(make_entry(2, ContentClass::Text, "ephemeral tornado deleted"))
+        .insert(make_entry(
+            2,
+            ContentClass::Text,
+            "ephemeral tornado deleted",
+        ))
         .expect("insert dead")
         .unwrap();
 
@@ -205,10 +233,18 @@ fn fts_rebuild_repopulates_from_scratch() {
     let (store, _dir) = open_temp_store();
 
     store
-        .insert(make_entry(10, ContentClass::Text, "checksum cryptography blake3"))
+        .insert(make_entry(
+            10,
+            ContentClass::Text,
+            "checksum cryptography blake3",
+        ))
         .expect("insert");
     store
-        .insert(make_entry(11, ContentClass::Text, "network latency throughput"))
+        .insert(make_entry(
+            11,
+            ContentClass::Text,
+            "network latency throughput",
+        ))
         .expect("insert");
 
     // Explicitly rebuild (simulates what happens after bulk deletions).
@@ -249,7 +285,10 @@ fn cleanup_orphans_removes_unreferenced_blobs() {
     let hash = *blake3::hash(&orphan_data).as_bytes();
     let orphan_rel = bs.store(&hash, &orphan_data).expect("store orphan");
     let orphan_abs = blob_dir.join(&orphan_rel);
-    assert!(orphan_abs.exists(), "orphan blob should be on disk before cleanup");
+    assert!(
+        orphan_abs.exists(),
+        "orphan blob should be on disk before cleanup"
+    );
 
     // Claim no paths are valid (empty set = nothing is referenced).
     let valid: HashSet<String> = HashSet::new();
@@ -283,7 +322,10 @@ fn cleanup_orphans_preserves_referenced_blobs() {
         blob_dir.join(&rel).exists(),
         "referenced blob must survive cleanup_orphans"
     );
-    assert_eq!(freed, 0, "zero bytes should be freed when blob is referenced");
+    assert_eq!(
+        freed, 0,
+        "zero bytes should be freed when blob is referenced"
+    );
 }
 
 /// End-to-end orphan GC via `prune`: plant a blob file in the blob directory
@@ -314,13 +356,17 @@ fn prune_gc_reclaims_orphan_blobs_from_deleted_entries() {
         .store(&orphan_hash, &orphan_data)
         .expect("plant orphan blob");
     let orphan_abs = blob_dir.join(&orphan_rel);
-    assert!(orphan_abs.exists(), "orphan blob must be on disk before prune");
+    assert!(
+        orphan_abs.exists(),
+        "orphan blob must be on disk before prune"
+    );
 
     // Prune with unlimited retention and a large max_entries so only orphan GC fires.
     let config = GeneralConfig {
         max_entries: 10000,
         max_blob_size_mb: 500,
         retention: Retention::Unlimited,
+        ephemeral_ttl_hours: 24,
     };
 
     let prune_stats = store.prune(&config).expect("prune");
@@ -355,11 +401,19 @@ fn prune_retention_age_deletes_old_entries_only() {
 
     // Insert three entries normally (all get current timestamps).
     let id_old1 = store
-        .insert(make_entry(1, ContentClass::Text, "ancient history entry one"))
+        .insert(make_entry(
+            1,
+            ContentClass::Text,
+            "ancient history entry one",
+        ))
         .expect("insert old1")
         .unwrap();
     let id_old2 = store
-        .insert(make_entry(2, ContentClass::Text, "ancient history entry two"))
+        .insert(make_entry(
+            2,
+            ContentClass::Text,
+            "ancient history entry two",
+        ))
         .expect("insert old2")
         .unwrap();
     store
@@ -372,8 +426,8 @@ fn prune_retention_age_deletes_old_entries_only() {
     //
     // Since ClipStore does not expose raw SQL execution we open a second
     // rusqlite connection to the same WAL database for the backdating surgery.
-    let ten_days_ago_ms = chrono::Utc::now().timestamp_millis()
-        - chrono::Duration::days(10).num_milliseconds();
+    let ten_days_ago_ms =
+        chrono::Utc::now().timestamp_millis() - chrono::Duration::days(10).num_milliseconds();
 
     {
         let conn = rusqlite::Connection::open(&db_path).expect("open second conn");
@@ -388,13 +442,15 @@ fn prune_retention_age_deletes_old_entries_only() {
         max_entries: 10000,
         max_blob_size_mb: 500,
         retention: Retention::Days7,
+        ephemeral_ttl_hours: 24,
     };
 
     let prune_stats = store.prune(&config).expect("prune");
 
     assert_eq!(
         prune_stats.entries_deleted, 2,
-        "prune should delete the 2 backdated entries, got: {:?}", prune_stats.entries_deleted
+        "prune should delete the 2 backdated entries, got: {:?}",
+        prune_stats.entries_deleted
     );
 
     let store_stats = store.stats().expect("stats after prune");
@@ -424,8 +480,8 @@ fn prune_retention_does_not_delete_pinned_entries() {
         .expect("insert old")
         .unwrap();
 
-    let ten_days_ago_ms = chrono::Utc::now().timestamp_millis()
-        - chrono::Duration::days(10).num_milliseconds();
+    let ten_days_ago_ms =
+        chrono::Utc::now().timestamp_millis() - chrono::Duration::days(10).num_milliseconds();
 
     {
         let conn = rusqlite::Connection::open(&db_path).expect("second conn");
@@ -440,13 +496,20 @@ fn prune_retention_does_not_delete_pinned_entries() {
         max_entries: 10000,
         max_blob_size_mb: 500,
         retention: Retention::Days7,
+        ephemeral_ttl_hours: 24,
     };
 
     let prune_stats = store.prune(&config).expect("prune");
-    assert_eq!(prune_stats.entries_deleted, 1, "only the unpinned old entry should be deleted");
+    assert_eq!(
+        prune_stats.entries_deleted, 1,
+        "only the unpinned old entry should be deleted"
+    );
 
     let store_stats = store.stats().expect("stats");
-    assert_eq!(store_stats.entry_count, 1, "pinned entry must survive retention pruning");
+    assert_eq!(
+        store_stats.entry_count, 1,
+        "pinned entry must survive retention pruning"
+    );
 
     let surviving = store.get_entry(id_pinned).expect("get pinned");
     assert!(surviving.pinned);
@@ -474,15 +537,16 @@ fn blob_threshold_exact_size_goes_to_blob_store() {
     let exact_data: Vec<u8> = vec![0x55; BLOB_THRESHOLD];
     let entry = make_entry_with_data(20, exact_data.clone(), "application/octet-stream");
 
-    let id = store.insert(entry).expect("insert exact threshold entry").unwrap();
+    let id = store
+        .insert(entry)
+        .expect("insert exact threshold entry")
+        .unwrap();
 
     // At least one prefix sub-directory must exist in blob_dir.
     let prefix_dirs: Vec<_> = std::fs::read_dir(&blob_dir)
         .expect("read blob dir")
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.file_type().map(|t| t.is_dir()).unwrap_or(false) && e.file_name() != ".tmp"
-        })
+        .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false) && e.file_name() != ".tmp")
         .collect();
 
     assert!(
@@ -494,7 +558,10 @@ fn blob_threshold_exact_size_goes_to_blob_store() {
     // Round-trip via blob path must return the original bytes.
     let reps = store.get_representations(id).expect("get_representations");
     assert_eq!(reps.len(), 1);
-    assert_eq!(reps[0].data, exact_data, "round-trip of blob-stored data must match");
+    assert_eq!(
+        reps[0].data, exact_data,
+        "round-trip of blob-stored data must match"
+    );
 }
 
 /// A payload of BLOB_THRESHOLD + 1 bytes is above the threshold and must go to
@@ -508,14 +575,15 @@ fn blob_threshold_one_over_goes_to_blob_store() {
     let over_data: Vec<u8> = vec![0x66; BLOB_THRESHOLD + 1];
     let entry = make_entry_with_data(21, over_data.clone(), "application/octet-stream");
 
-    let id = store.insert(entry).expect("insert over-threshold entry").unwrap();
+    let id = store
+        .insert(entry)
+        .expect("insert over-threshold entry")
+        .unwrap();
 
     let prefix_dirs: Vec<_> = std::fs::read_dir(&blob_dir)
         .expect("read blob dir")
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.file_type().map(|t| t.is_dir()).unwrap_or(false) && e.file_name() != ".tmp"
-        })
+        .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false) && e.file_name() != ".tmp")
         .collect();
 
     assert!(
@@ -526,7 +594,10 @@ fn blob_threshold_one_over_goes_to_blob_store() {
     // Round-trip to confirm blob is readable back.
     let reps = store.get_representations(id).expect("get_representations");
     assert_eq!(reps.len(), 1);
-    assert_eq!(reps[0].data, over_data, "round-trip of blob-stored data must match");
+    assert_eq!(
+        reps[0].data, over_data,
+        "round-trip of blob-stored data must match"
+    );
 }
 
 /// Payload of exactly BLOB_THRESHOLD - 1 bytes (one below) is definitively inline.
@@ -543,9 +614,7 @@ fn blob_threshold_one_under_is_stored_inline() {
     let prefix_dirs: Vec<_> = std::fs::read_dir(&blob_dir)
         .expect("read blob dir")
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.file_type().map(|t| t.is_dir()).unwrap_or(false) && e.file_name() != ".tmp"
-        })
+        .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false) && e.file_name() != ".tmp")
         .collect();
 
     assert!(
@@ -578,7 +647,10 @@ fn schema_version_is_set_to_1_after_open() {
         )
         .expect("read schema_version");
 
-    assert_eq!(version, 1, "schema_version must be 1 after initial open");
+    assert_eq!(
+        version, SCHEMA_VERSION,
+        "schema_version must match the current schema constant after initial open"
+    );
 }
 
 /// Re-opening the same database must not re-insert a second version row; the
@@ -595,11 +667,7 @@ fn schema_version_is_stable_across_multiple_opens() {
 
     let conn = rusqlite::Connection::open(&db_path).expect("inspect conn");
     let row_count: u32 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM schema_version",
-            [],
-            |row| row.get(0),
-        )
+        .query_row("SELECT COUNT(*) FROM schema_version", [], |row| row.get(0))
         .expect("count schema_version rows");
 
     assert_eq!(
@@ -641,6 +709,7 @@ fn insert_with_duplicate_mime_rolls_back_entire_transaction() {
         ],
         source_app: None,
         ephemeral: false,
+        metadata: Default::default(),
     };
 
     // The insert must return an error.
@@ -671,18 +740,30 @@ fn store_remains_usable_after_rolled_back_insert() {
         preview_text: Some("fail".to_string()),
         canonical_hash: hash1,
         representations: vec![
-            MimePayload { mime: "text/plain".to_string(), data: b"a".to_vec() },
-            MimePayload { mime: "text/plain".to_string(), data: b"b".to_vec() },
+            MimePayload {
+                mime: "text/plain".to_string(),
+                data: b"a".to_vec(),
+            },
+            MimePayload {
+                mime: "text/plain".to_string(),
+                data: b"b".to_vec(),
+            },
         ],
         source_app: None,
         ephemeral: false,
+        metadata: Default::default(),
     };
     let _ = store.insert(bad_entry); // error expected but ignored here
 
     // A valid insert must still work.
     let good_entry = make_entry(99, ContentClass::Text, "recovery works");
-    let id = store.insert(good_entry).expect("good insert after failed one");
-    assert!(id.is_some(), "store must accept valid inserts after a failed transaction");
+    let id = store
+        .insert(good_entry)
+        .expect("good insert after failed one");
+    assert!(
+        id.is_some(),
+        "store must accept valid inserts after a failed transaction"
+    );
 
     let stats = store.stats().expect("stats");
     assert_eq!(stats.entry_count, 1);
@@ -714,7 +795,11 @@ fn concurrent_read_write_via_mutex() {
     for i in 0..WRITERS {
         let store_arc = Arc::clone(&store);
         handles.push(std::thread::spawn(move || {
-            let entry = make_entry(i as u8, ContentClass::Text, &format!("concurrent entry {i}"));
+            let entry = make_entry(
+                i as u8,
+                ContentClass::Text,
+                &format!("concurrent entry {i}"),
+            );
             let store = store_arc.lock().expect("lock for write");
             store.insert(entry).expect("concurrent insert");
         }));
@@ -763,8 +848,12 @@ fn interleaved_insert_and_query_maintain_consistency() {
         // Write.
         {
             let s = store.lock().expect("write lock");
-            s.insert(make_entry(i as u8, ContentClass::Text, &format!("round {i}")))
-                .expect("insert round");
+            s.insert(make_entry(
+                i as u8,
+                ContentClass::Text,
+                &format!("round {i}"),
+            ))
+            .expect("insert round");
         }
 
         // Read and verify non-decreasing count.

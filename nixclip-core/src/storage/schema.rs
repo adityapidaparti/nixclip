@@ -1,6 +1,6 @@
 use crate::Result;
 
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// Set pragmas and create all tables, indexes, and virtual tables if they do not
 /// already exist.

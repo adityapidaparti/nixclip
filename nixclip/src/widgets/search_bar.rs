@@ -1,6 +1,6 @@
+use gtk::prelude::*;
 use gtk4 as gtk;
 use gtk4::glib;
-use gtk::prelude::*;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -37,14 +37,12 @@ impl SearchBar {
             }
 
             let timeout_id_clone = timeout_id.clone();
-            let id = glib::timeout_add_local_once(
-                std::time::Duration::from_millis(100),
-                move || {
+            let id =
+                glib::timeout_add_local_once(std::time::Duration::from_millis(100), move || {
                     cb(text);
                     // Clear the stored id since the timer has fired.
                     timeout_id_clone.borrow_mut().take();
-                },
-            );
+                });
             *timeout_id.borrow_mut() = Some(id);
         });
     }

@@ -52,9 +52,10 @@ pub fn run_once(state: &AppState) -> Result<PruneStats> {
     let general = config.general.clone();
     drop(config);
 
-    let store = state.store.lock().map_err(|e| {
-        nixclip_core::NixClipError::Config(format!("store mutex poisoned: {e}"))
-    })?;
+    let store = state
+        .store
+        .lock()
+        .map_err(|e| nixclip_core::NixClipError::Config(format!("store mutex poisoned: {e}")))?;
 
     // Standard retention / max-entries pruning.
     let mut stats = store.prune(&general)?;

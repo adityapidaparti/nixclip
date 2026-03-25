@@ -82,11 +82,7 @@ impl PrivacyFilter {
     /// Only app-name and MIME-type checks are performed here; content-pattern
     /// checks require the preview text produced by the content processor and are
     /// deferred to [`check_content_patterns`].
-    pub fn check_pre_content(
-        &self,
-        source_app: Option<&str>,
-        mimes: &[String],
-    ) -> FilterResult {
+    pub fn check_pre_content(&self, source_app: Option<&str>, mimes: &[String]) -> FilterResult {
         // 1. Check source application.
         if let Some(app) = source_app {
             if self.should_ignore_app(app) {
@@ -388,11 +384,7 @@ mod tests {
         };
         let f = PrivacyFilter::new(&config).unwrap();
         // Would normally be Reject, but respect_sensitive_hints is off.
-        let result = f.check(
-            None,
-            &mimes(&["x-kde-passwordManagerHint"]),
-            None,
-        );
+        let result = f.check(None, &mimes(&["x-kde-passwordManagerHint"]), None);
         assert_eq!(result, FilterResult::Allow);
     }
 
@@ -418,30 +410,22 @@ mod tests {
     #[test]
     fn pre_content_allows_normal_event() {
         let f = default_filter();
-        let result = f.check_pre_content(
-            Some("org.mozilla.firefox"),
-            &mimes(&["text/plain"]),
-        );
+        let result = f.check_pre_content(Some("org.mozilla.firefox"), &mimes(&["text/plain"]));
         assert_eq!(result, FilterResult::Allow);
     }
 
     #[test]
     fn pre_content_rejects_ignored_app() {
         let f = filter_with_apps(vec!["keepassxc"]);
-        let result = f.check_pre_content(
-            Some("org.keepassxc.KeePassXC"),
-            &mimes(&["text/plain"]),
-        );
+        let result = f.check_pre_content(Some("org.keepassxc.KeePassXC"), &mimes(&["text/plain"]));
         assert_eq!(result, FilterResult::Reject);
     }
 
     #[test]
     fn pre_content_rejects_sensitive_mime() {
         let f = default_filter();
-        let result = f.check_pre_content(
-            None,
-            &mimes(&["text/plain", "x-kde-passwordManagerHint"]),
-        );
+        let result =
+            f.check_pre_content(None, &mimes(&["text/plain", "x-kde-passwordManagerHint"]));
         assert_eq!(result, FilterResult::Reject);
     }
 
@@ -449,10 +433,7 @@ mod tests {
     fn pre_content_does_not_check_patterns() {
         // Even with patterns configured, pre_content should not evaluate them.
         let f = filter_with_patterns(vec![r"^sk-[a-zA-Z0-9]{48}"]);
-        let result = f.check_pre_content(
-            Some("org.mozilla.firefox"),
-            &mimes(&["text/plain"]),
-        );
+        let result = f.check_pre_content(Some("org.mozilla.firefox"), &mimes(&["text/plain"]));
         // Should allow — pattern matching is deferred to phase 2.
         assert_eq!(result, FilterResult::Allow);
     }
@@ -488,7 +469,7 @@ mod tests {
             patterns: vec![],
             respect_sensitive_hints: true,
         };
-        let _f = PrivacyFilter::new(&config).unwrap();
+        let f = PrivacyFilter::new(&config).unwrap();
         let key = format!("sk-{}", "A".repeat(48));
         let result = f.check_content_patterns(Some(&key));
         assert_eq!(result, FilterResult::Allow);

@@ -38,8 +38,12 @@ fn insert_text(store: &ClipStore, seed: u8, preview: &str) -> EntryId {
         }],
         source_app: None,
         ephemeral: false,
+        metadata: Default::default(),
     };
-    store.insert(entry).expect("insert text").expect("new entry id")
+    store
+        .insert(entry)
+        .expect("insert text")
+        .expect("new entry id")
 }
 
 /// Insert with a fully explicit hash (for fine-grained uniqueness).
@@ -54,6 +58,7 @@ fn insert_text_with_hash(store: &ClipStore, hash: [u8; 32], preview: &str) -> En
         }],
         source_app: None,
         ephemeral: false,
+        metadata: Default::default(),
     };
     store.insert(entry).expect("insert").expect("new entry id")
 }
@@ -73,8 +78,12 @@ fn insert_url(store: &ClipStore, seed: u8, url: &str) -> EntryId {
         }],
         source_app: None,
         ephemeral: false,
+        metadata: Default::default(),
     };
-    store.insert(entry).expect("insert url").expect("new entry id")
+    store
+        .insert(entry)
+        .expect("insert url")
+        .expect("new entry id")
 }
 
 // ===========================================================================
@@ -87,9 +96,7 @@ fn fts_prefix_dock_matches_docker_run() {
     let id = insert_text(&store, 1, "docker run -it ubuntu");
     insert_text(&store, 2, "git commit --amend");
 
-    let result = engine
-        .search("dock", None, 0, 20)
-        .expect("search 'dock'");
+    let result = engine.search("dock", None, 0, 20).expect("search 'dock'");
 
     assert!(
         result.total >= 1,
@@ -151,9 +158,7 @@ fn fts_fallback_to_like_when_fts_returns_nothing() {
     // "AND OR NOT" sanitizes to an empty FTS expression → search_fts returns
     // Ok(vec![]) → fallback LIKE '%AND OR NOT%'.  The entry contains the
     // substring "AND" so LIKE should match.
-    let result = engine
-        .search("AND", None, 0, 20)
-        .expect("search 'AND'");
+    let result = engine.search("AND", None, 0, 20).expect("search 'AND'");
 
     // "AND" alone is a boolean keyword stripped by sanitize_fts5_query.
     // After sanitization the FTS expression is empty → sanitize returns None
@@ -231,9 +236,7 @@ fn composite_score_formula_relevance_vs_recency() {
         "docker container images",
     );
 
-    let result = engine
-        .search("docker", None, 0, 20)
-        .expect("search docker");
+    let result = engine.search("docker", None, 0, 20).expect("search docker");
 
     assert!(
         result.total >= 2,
@@ -347,9 +350,7 @@ fn newer_entry_ranks_higher_than_older_for_equal_relevance() {
         "terraform plan infrastructure",
     );
 
-    let result = engine
-        .search("terraform", None, 0, 20)
-        .expect("search");
+    let result = engine.search("terraform", None, 0, 20).expect("search");
 
     assert!(result.total >= 2, "both terraform entries must match");
 
@@ -597,8 +598,13 @@ fn search_engine_connection_is_read_only() {
     insert_text(&store, 1, "some content");
 
     // A read operation must succeed.
-    let result = engine.search("some", None, 0, 10).expect("read-only search must work");
-    assert!(result.total >= 1, "read must succeed on a read-only connection");
+    let result = engine
+        .search("some", None, 0, 10)
+        .expect("read-only search must work");
+    assert!(
+        result.total >= 1,
+        "read must succeed on a read-only connection"
+    );
 
     // Open the same DB with read-only flags (as SearchEngine does) and
     // confirm that a write attempt fails.
@@ -647,9 +653,7 @@ fn search_is_case_insensitive_uppercase_query() {
     let (store, engine, _dir) = setup();
     let id = insert_text(&store, 1, "git status output");
 
-    let result = engine
-        .search("GIT", None, 0, 20)
-        .expect("uppercase query");
+    let result = engine.search("GIT", None, 0, 20).expect("uppercase query");
     let ids: Vec<EntryId> = result.entries.iter().map(|e| e.id).collect();
     assert!(
         ids.contains(&id),
@@ -732,8 +736,5 @@ fn search_limit_zero_returns_zero_entries_but_correct_total() {
         result.total, 2,
         "total should reflect all matching entries even with limit=0"
     );
-    assert!(
-        result.entries.is_empty(),
-        "limit=0 must return no entries"
-    );
+    assert!(result.entries.is_empty(), "limit=0 must return no entries");
 }

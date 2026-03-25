@@ -1,10 +1,10 @@
+use nixclip_core::config::GeneralConfig;
 /// Integration tests for ClipStore.
 ///
 /// Each test creates an isolated SQLite database and blob directory via
 /// `tempfile::tempdir()` so tests can run in parallel without interference.
 use nixclip_core::storage::ClipStore;
 use nixclip_core::{ContentClass, EntryMetadata, MimePayload, NewEntry, Query};
-use nixclip_core::config::GeneralConfig;
 
 // ---------------------------------------------------------------------------
 // Helper
@@ -70,42 +70,57 @@ fn insert_returns_some_id() {
 #[test]
 fn query_returns_inserted_entry() {
     let (store, _dir) = open_temp_store();
-    store.insert(make_entry(1, ContentClass::Text, "rust is great")).expect("insert");
+    store
+        .insert(make_entry(1, ContentClass::Text, "rust is great"))
+        .expect("insert");
 
-    let result = store.query(Query {
-        text: None,
-        content_class: None,
-        offset: 0,
-        limit: 10,
-    }).expect("query");
+    let result = store
+        .query(Query {
+            text: None,
+            content_class: None,
+            offset: 0,
+            limit: 10,
+        })
+        .expect("query");
 
     assert_eq!(result.total, 1);
     assert_eq!(result.entries.len(), 1);
-    assert_eq!(result.entries[0].preview_text.as_deref(), Some("rust is great"));
+    assert_eq!(
+        result.entries[0].preview_text.as_deref(),
+        Some("rust is great")
+    );
 }
 
 #[test]
 fn query_filters_by_content_class() {
     let (store, _dir) = open_temp_store();
-    store.insert(make_entry(1, ContentClass::Text, "plain text")).expect("insert");
-    store.insert(make_entry(2, ContentClass::Url, "https://example.com")).expect("insert");
+    store
+        .insert(make_entry(1, ContentClass::Text, "plain text"))
+        .expect("insert");
+    store
+        .insert(make_entry(2, ContentClass::Url, "https://example.com"))
+        .expect("insert");
 
-    let text_only = store.query(Query {
-        text: None,
-        content_class: Some(ContentClass::Text),
-        offset: 0,
-        limit: 10,
-    }).expect("query text");
+    let text_only = store
+        .query(Query {
+            text: None,
+            content_class: Some(ContentClass::Text),
+            offset: 0,
+            limit: 10,
+        })
+        .expect("query text");
 
     assert_eq!(text_only.total, 1);
     assert_eq!(text_only.entries[0].content_class, ContentClass::Text);
 
-    let url_only = store.query(Query {
-        text: None,
-        content_class: Some(ContentClass::Url),
-        offset: 0,
-        limit: 10,
-    }).expect("query url");
+    let url_only = store
+        .query(Query {
+            text: None,
+            content_class: Some(ContentClass::Url),
+            offset: 0,
+            limit: 10,
+        })
+        .expect("query url");
 
     assert_eq!(url_only.total, 1);
     assert_eq!(url_only.entries[0].content_class, ContentClass::Url);
@@ -115,26 +130,32 @@ fn query_filters_by_content_class() {
 fn query_respects_limit_and_offset() {
     let (store, _dir) = open_temp_store();
     for i in 0..5u8 {
-        store.insert(make_entry(i, ContentClass::Text, &format!("entry {i}"))).expect("insert");
+        store
+            .insert(make_entry(i, ContentClass::Text, &format!("entry {i}")))
+            .expect("insert");
     }
 
     // First page: 2 entries.
-    let page1 = store.query(Query {
-        text: None,
-        content_class: None,
-        offset: 0,
-        limit: 2,
-    }).expect("page1");
+    let page1 = store
+        .query(Query {
+            text: None,
+            content_class: None,
+            offset: 0,
+            limit: 2,
+        })
+        .expect("page1");
     assert_eq!(page1.total, 5);
     assert_eq!(page1.entries.len(), 2);
 
     // Second page: 2 more.
-    let page2 = store.query(Query {
-        text: None,
-        content_class: None,
-        offset: 2,
-        limit: 2,
-    }).expect("page2");
+    let page2 = store
+        .query(Query {
+            text: None,
+            content_class: None,
+            offset: 2,
+            limit: 2,
+        })
+        .expect("page2");
     assert_eq!(page2.total, 5);
     assert_eq!(page2.entries.len(), 2);
 }
@@ -142,18 +163,28 @@ fn query_respects_limit_and_offset() {
 #[test]
 fn query_full_text_search() {
     let (store, _dir) = open_temp_store();
-    store.insert(make_entry(1, ContentClass::Text, "the quick brown fox")).expect("insert");
-    store.insert(make_entry(2, ContentClass::Text, "hello world")).expect("insert");
+    store
+        .insert(make_entry(1, ContentClass::Text, "the quick brown fox"))
+        .expect("insert");
+    store
+        .insert(make_entry(2, ContentClass::Text, "hello world"))
+        .expect("insert");
 
-    let result = store.query(Query {
-        text: Some("quick".to_string()),
-        content_class: None,
-        offset: 0,
-        limit: 10,
-    }).expect("fts query");
+    let result = store
+        .query(Query {
+            text: Some("quick".to_string()),
+            content_class: None,
+            offset: 0,
+            limit: 10,
+        })
+        .expect("fts query");
 
     assert_eq!(result.total, 1);
-    assert!(result.entries[0].preview_text.as_deref().unwrap().contains("quick"));
+    assert!(result.entries[0]
+        .preview_text
+        .as_deref()
+        .unwrap()
+        .contains("quick"));
 }
 
 // ---------------------------------------------------------------------------
@@ -196,8 +227,12 @@ fn dedup_same_hash_returns_none() {
 fn dedup_different_hash_inserts_new_entry() {
     let (store, _dir) = open_temp_store();
 
-    let id1 = store.insert(make_entry(1, ContentClass::Text, "first")).expect("insert 1");
-    let id2 = store.insert(make_entry(2, ContentClass::Text, "second")).expect("insert 2");
+    let id1 = store
+        .insert(make_entry(1, ContentClass::Text, "first"))
+        .expect("insert 1");
+    let id2 = store
+        .insert(make_entry(2, ContentClass::Text, "second"))
+        .expect("insert 2");
 
     assert!(id1.is_some());
     assert!(id2.is_some());
@@ -241,12 +276,14 @@ fn large_payload_goes_to_blob_store() {
         .filter_map(|e| e.ok())
         .filter(|e| {
             // Only count actual prefix sub-directories (not .tmp).
-            e.file_type().map(|t| t.is_dir()).unwrap_or(false)
-                && e.file_name() != ".tmp"
+            e.file_type().map(|t| t.is_dir()).unwrap_or(false) && e.file_name() != ".tmp"
         })
         .count();
 
-    assert!(blob_file_count >= 1, "blob store should contain at least one prefix directory");
+    assert!(
+        blob_file_count >= 1,
+        "blob store should contain at least one prefix directory"
+    );
 }
 
 #[test]
@@ -277,10 +314,7 @@ fn small_payload_stored_inline() {
     let has_blob_files = std::fs::read_dir(&blob_dir)
         .expect("read blob dir")
         .filter_map(|e| e.ok())
-        .any(|e| {
-            e.file_type().map(|t| t.is_dir()).unwrap_or(false)
-                && e.file_name() != ".tmp"
-        });
+        .any(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false) && e.file_name() != ".tmp");
 
     assert!(!has_blob_files, "small payload should not go to blob store");
 }
@@ -292,16 +326,21 @@ fn small_payload_stored_inline() {
 #[test]
 fn delete_removes_entry() {
     let (store, _dir) = open_temp_store();
-    let id = store.insert(make_entry(1, ContentClass::Text, "to delete")).expect("insert").unwrap();
+    let id = store
+        .insert(make_entry(1, ContentClass::Text, "to delete"))
+        .expect("insert")
+        .unwrap();
 
     store.delete(&[id]).expect("delete");
 
-    let result = store.query(Query {
-        text: None,
-        content_class: None,
-        offset: 0,
-        limit: 10,
-    }).expect("query after delete");
+    let result = store
+        .query(Query {
+            text: None,
+            content_class: None,
+            offset: 0,
+            limit: 10,
+        })
+        .expect("query after delete");
 
     assert_eq!(result.total, 0);
 }
@@ -309,7 +348,9 @@ fn delete_removes_entry() {
 #[test]
 fn delete_empty_slice_is_noop() {
     let (store, _dir) = open_temp_store();
-    store.insert(make_entry(1, ContentClass::Text, "safe")).expect("insert");
+    store
+        .insert(make_entry(1, ContentClass::Text, "safe"))
+        .expect("insert");
 
     store.delete(&[]).expect("delete empty");
 
@@ -320,9 +361,17 @@ fn delete_empty_slice_is_noop() {
 #[test]
 fn delete_multiple_entries() {
     let (store, _dir) = open_temp_store();
-    let id1 = store.insert(make_entry(1, ContentClass::Text, "a")).expect("insert").unwrap();
-    let id2 = store.insert(make_entry(2, ContentClass::Text, "b")).expect("insert").unwrap();
-    store.insert(make_entry(3, ContentClass::Text, "c")).expect("insert");
+    let id1 = store
+        .insert(make_entry(1, ContentClass::Text, "a"))
+        .expect("insert")
+        .unwrap();
+    let id2 = store
+        .insert(make_entry(2, ContentClass::Text, "b"))
+        .expect("insert")
+        .unwrap();
+    store
+        .insert(make_entry(3, ContentClass::Text, "c"))
+        .expect("insert");
 
     store.delete(&[id1, id2]).expect("delete");
 
@@ -337,7 +386,10 @@ fn delete_multiple_entries() {
 #[test]
 fn pin_sets_pinned_flag() {
     let (store, _dir) = open_temp_store();
-    let id = store.insert(make_entry(1, ContentClass::Text, "pin me")).expect("insert").unwrap();
+    let id = store
+        .insert(make_entry(1, ContentClass::Text, "pin me"))
+        .expect("insert")
+        .unwrap();
 
     store.pin(id, true).expect("pin");
 
@@ -348,7 +400,10 @@ fn pin_sets_pinned_flag() {
 #[test]
 fn unpin_clears_pinned_flag() {
     let (store, _dir) = open_temp_store();
-    let id = store.insert(make_entry(1, ContentClass::Text, "unpin me")).expect("insert").unwrap();
+    let id = store
+        .insert(make_entry(1, ContentClass::Text, "unpin me"))
+        .expect("insert")
+        .unwrap();
 
     store.pin(id, true).expect("pin");
     store.pin(id, false).expect("unpin");
@@ -360,17 +415,25 @@ fn unpin_clears_pinned_flag() {
 #[test]
 fn pinned_entries_sort_first() {
     let (store, _dir) = open_temp_store();
-    let id1 = store.insert(make_entry(1, ContentClass::Text, "unpinned")).expect("insert").unwrap();
-    let id2 = store.insert(make_entry(2, ContentClass::Text, "pinned")).expect("insert").unwrap();
+    let id1 = store
+        .insert(make_entry(1, ContentClass::Text, "unpinned"))
+        .expect("insert")
+        .unwrap();
+    let id2 = store
+        .insert(make_entry(2, ContentClass::Text, "pinned"))
+        .expect("insert")
+        .unwrap();
 
     store.pin(id2, true).expect("pin");
 
-    let result = store.query(Query {
-        text: None,
-        content_class: None,
-        offset: 0,
-        limit: 10,
-    }).expect("query");
+    let result = store
+        .query(Query {
+            text: None,
+            content_class: None,
+            offset: 0,
+            limit: 10,
+        })
+        .expect("query");
 
     assert_eq!(result.entries[0].id, id2, "pinned entry should come first");
     assert_eq!(result.entries[1].id, id1);
@@ -383,11 +446,18 @@ fn pinned_entries_sort_first() {
 #[test]
 fn clear_unpinned_removes_only_unpinned() {
     let (store, _dir) = open_temp_store();
-    let id_keep = store.insert(make_entry(1, ContentClass::Text, "keep me")).expect("insert").unwrap();
+    let id_keep = store
+        .insert(make_entry(1, ContentClass::Text, "keep me"))
+        .expect("insert")
+        .unwrap();
     store.pin(id_keep, true).expect("pin");
 
-    store.insert(make_entry(2, ContentClass::Text, "remove me")).expect("insert");
-    store.insert(make_entry(3, ContentClass::Text, "also remove")).expect("insert");
+    store
+        .insert(make_entry(2, ContentClass::Text, "remove me"))
+        .expect("insert");
+    store
+        .insert(make_entry(3, ContentClass::Text, "also remove"))
+        .expect("insert");
 
     store.clear_unpinned().expect("clear_unpinned");
 
@@ -401,7 +471,9 @@ fn clear_unpinned_removes_only_unpinned() {
 #[test]
 fn clear_unpinned_on_empty_store_is_noop() {
     let (store, _dir) = open_temp_store();
-    store.clear_unpinned().expect("clear_unpinned on empty store");
+    store
+        .clear_unpinned()
+        .expect("clear_unpinned on empty store");
     let stats = store.stats().expect("stats");
     assert_eq!(stats.entry_count, 0);
 }
@@ -416,7 +488,9 @@ fn prune_enforces_max_entries() {
 
     // Insert 5 entries.
     for i in 0..5u8 {
-        store.insert(make_entry(i, ContentClass::Text, &format!("entry {i}"))).expect("insert");
+        store
+            .insert(make_entry(i, ContentClass::Text, &format!("entry {i}")))
+            .expect("insert");
         // Small sleep substitute: adjust last_seen_at by tweaking hash so they
         // get unique rows (the timestamp difference may be zero in fast tests,
         // but the prune uses ORDER BY last_seen_at ASC for overflow deletion).
@@ -430,7 +504,10 @@ fn prune_enforces_max_entries() {
     };
 
     let prune_stats = store.prune(&config).expect("prune");
-    assert_eq!(prune_stats.entries_deleted, 2, "should prune 2 oldest entries");
+    assert_eq!(
+        prune_stats.entries_deleted, 2,
+        "should prune 2 oldest entries"
+    );
 
     let store_stats = store.stats().expect("stats");
     assert_eq!(store_stats.entry_count, 3);
@@ -441,7 +518,9 @@ fn prune_respects_unlimited_retention() {
     let (store, _dir) = open_temp_store();
 
     for i in 0..3u8 {
-        store.insert(make_entry(i, ContentClass::Text, &format!("entry {i}"))).expect("insert");
+        store
+            .insert(make_entry(i, ContentClass::Text, &format!("entry {i}")))
+            .expect("insert");
     }
 
     let config = GeneralConfig {
@@ -452,7 +531,10 @@ fn prune_respects_unlimited_retention() {
     };
 
     let prune_stats = store.prune(&config).expect("prune");
-    assert_eq!(prune_stats.entries_deleted, 0, "unlimited retention should not delete");
+    assert_eq!(
+        prune_stats.entries_deleted, 0,
+        "unlimited retention should not delete"
+    );
 
     let store_stats = store.stats().expect("stats");
     assert_eq!(store_stats.entry_count, 3);
@@ -468,8 +550,12 @@ fn stats_entry_count_matches_inserts() {
     let stats0 = store.stats().expect("stats before");
     assert_eq!(stats0.entry_count, 0);
 
-    store.insert(make_entry(1, ContentClass::Text, "a")).expect("insert");
-    store.insert(make_entry(2, ContentClass::Text, "b")).expect("insert");
+    store
+        .insert(make_entry(1, ContentClass::Text, "a"))
+        .expect("insert");
+    store
+        .insert(make_entry(2, ContentClass::Text, "b"))
+        .expect("insert");
 
     let stats2 = store.stats().expect("stats after");
     assert_eq!(stats2.entry_count, 2);
@@ -478,7 +564,9 @@ fn stats_entry_count_matches_inserts() {
 #[test]
 fn stats_db_size_is_positive_after_insert() {
     let (store, _dir) = open_temp_store();
-    store.insert(make_entry(1, ContentClass::Text, "hello")).expect("insert");
+    store
+        .insert(make_entry(1, ContentClass::Text, "hello"))
+        .expect("insert");
     let stats = store.stats().expect("stats");
     assert!(stats.db_size_bytes > 0, "db file should have nonzero size");
 }
@@ -521,7 +609,13 @@ fn get_representations_returns_stored_data() {
 #[test]
 fn fresh_store_passes_integrity_check() {
     let (store, _dir) = open_temp_store();
-    store.insert(make_entry(1, ContentClass::Text, "integrity test")).expect("insert");
+    store
+        .insert(make_entry(1, ContentClass::Text, "integrity test"))
+        .expect("insert");
     let issues = store.integrity_check().expect("integrity_check");
-    assert!(issues.is_empty(), "fresh store should have no integrity issues: {:?}", issues);
+    assert!(
+        issues.is_empty(),
+        "fresh store should have no integrity issues: {:?}",
+        issues
+    );
 }

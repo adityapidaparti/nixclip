@@ -291,8 +291,8 @@ impl Config {
     pub fn load(path: impl AsRef<std::path::Path>) -> Result<Config> {
         let raw = std::fs::read_to_string(path.as_ref())
             .map_err(|e| NixClipError::Config(format!("cannot read config file: {e}")))?;
-        let cfg: Config = toml::from_str(&raw)
-            .map_err(|e| NixClipError::Config(format!("invalid TOML: {e}")))?;
+        let cfg: Config =
+            toml::from_str(&raw).map_err(|e| NixClipError::Config(format!("invalid TOML: {e}")))?;
         Ok(cfg)
     }
 

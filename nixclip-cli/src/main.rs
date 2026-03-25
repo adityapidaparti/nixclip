@@ -167,10 +167,7 @@ async fn main() {
 }
 
 async fn run(cli: Cli) -> nixclip_core::Result<()> {
-    let socket_path = cli
-        .socket
-        .clone()
-        .unwrap_or_else(Config::socket_path);
+    let socket_path = cli.socket.clone().unwrap_or_else(Config::socket_path);
 
     match cli.command {
         // Commands that do NOT require a daemon connection.

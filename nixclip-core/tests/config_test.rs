@@ -21,13 +21,17 @@ fn retention_30days_is_30_days() {
 
 #[test]
 fn retention_3months_is_90_days() {
-    let d = Retention::Months3.to_duration().expect("should not be None");
+    let d = Retention::Months3
+        .to_duration()
+        .expect("should not be None");
     assert_eq!(d.num_days(), 90);
 }
 
 #[test]
 fn retention_6months_is_180_days() {
-    let d = Retention::Months6.to_duration().expect("should not be None");
+    let d = Retention::Months6
+        .to_duration()
+        .expect("should not be None");
     assert_eq!(d.num_days(), 180);
 }
 
@@ -144,11 +148,13 @@ fn default_ignore_apps_include_keepassxc_and_1password() {
     let cfg = Config::default();
     let apps = &cfg.ignore.apps;
     assert!(
-        apps.iter().any(|a| a.contains("keepassxc") || a.contains("KeePassXC")),
+        apps.iter()
+            .any(|a| a.contains("keepassxc") || a.contains("KeePassXC")),
         "default apps should include KeePassXC: {apps:?}"
     );
     assert!(
-        apps.iter().any(|a| a.contains("1password") || a.contains("1Password")),
+        apps.iter()
+            .any(|a| a.contains("1password") || a.contains("1Password")),
         "default apps should include 1Password: {apps:?}"
     );
 }
@@ -192,10 +198,12 @@ fn empty_toml_gives_all_defaults() {
 
 #[test]
 fn partial_general_section_fills_missing_with_defaults() {
-    let cfg = parse(r#"
+    let cfg = parse(
+        r#"
 [general]
 max_entries = 500
-"#);
+"#,
+    );
     assert_eq!(cfg.general.max_entries, 500);
     // Defaults for other fields.
     assert_eq!(cfg.general.max_blob_size_mb, 500);
@@ -220,7 +228,8 @@ fn all_retention_values_parse_from_toml() {
 
 #[test]
 fn ui_section_parses_custom_values() {
-    let cfg = parse(r#"
+    let cfg = parse(
+        r#"
 [ui]
 theme = "dark"
 width = 800
@@ -228,7 +237,8 @@ max_visible_entries = 12
 show_source_app = false
 show_content_badges = false
 position = "bottom-left"
-"#);
+"#,
+    );
     assert_eq!(cfg.ui.theme, "dark");
     assert_eq!(cfg.ui.width, 800);
     assert_eq!(cfg.ui.max_visible_entries, 12);
@@ -239,11 +249,13 @@ position = "bottom-left"
 
 #[test]
 fn keybind_section_parses_custom_values() {
-    let cfg = parse(r#"
+    let cfg = parse(
+        r#"
 [keybind]
 toggle = "Ctrl+Alt+V"
 pin = "Ctrl+G"
-"#);
+"#,
+    );
     assert_eq!(cfg.keybind.toggle, "Ctrl+Alt+V");
     assert_eq!(cfg.keybind.pin, "Ctrl+G");
     // Unprovided keys stay as default.
@@ -252,12 +264,14 @@ pin = "Ctrl+G"
 
 #[test]
 fn ignore_section_parses_custom_apps_and_patterns() {
-    let cfg = parse(r#"
+    let cfg = parse(
+        r#"
 [ignore]
 apps = ["com.custom.PasswordManager"]
 patterns = ["^TOKEN_[a-z]{20}"]
 respect_sensitive_hints = false
-"#);
+"#,
+    );
     assert_eq!(cfg.ignore.apps, vec!["com.custom.PasswordManager"]);
     assert_eq!(cfg.ignore.patterns, vec!["^TOKEN_[a-z]{20}"]);
     assert!(!cfg.ignore.respect_sensitive_hints);
@@ -265,11 +279,13 @@ respect_sensitive_hints = false
 
 #[test]
 fn ignore_empty_arrays_are_valid() {
-    let cfg = parse(r#"
+    let cfg = parse(
+        r#"
 [ignore]
 apps = []
 patterns = []
-"#);
+"#,
+    );
     assert!(cfg.ignore.apps.is_empty());
     assert!(cfg.ignore.patterns.is_empty());
 }
@@ -281,6 +297,7 @@ fn full_config_round_trip_via_toml_string() {
             max_entries: 250,
             max_blob_size_mb: 100,
             retention: Retention::Days7,
+            ephemeral_ttl_hours: 24,
         },
         ui: UiConfig {
             theme: "dark".to_string(),
@@ -331,6 +348,7 @@ fn save_and_load_round_trip() {
             max_entries: 42,
             max_blob_size_mb: 10,
             retention: Retention::Year1,
+            ephemeral_ttl_hours: 24,
         },
         ui: UiConfig {
             theme: "light".to_string(),

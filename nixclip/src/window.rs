@@ -1,6 +1,6 @@
 //! The popup window -- the core of the NixClip UI.
 
-use gtk::prelude::*;
+use adw::prelude::*;
 use gtk4 as gtk;
 use gtk4::gdk;
 use gtk4::glib;
@@ -37,7 +37,7 @@ const BADGE_CSS: &str = r#"
 
 /// The main clipboard-history popup window.
 pub struct PopupWindow {
-    pub window: adw::Window,
+    pub window: adw::ApplicationWindow,
     search_bar: SearchBar,
     filter_tabs: FilterTabs,
     list_box: gtk::ListBox,
@@ -59,13 +59,10 @@ impl PopupWindow {
         let min_list_height = (visible_rows * 60).max(180);
 
         // --- Window ----------------------------------------------------------
-        let window = adw::Window::new();
-        window.set_application(Some(app));
+        let window = adw::ApplicationWindow::new(app);
         window.set_decorated(false);
         window.set_default_size(width, 500);
         window.set_resizable(false);
-        // Ask the window manager not to show this in the taskbar.
-        // (Note: hide-on-close keeps the window object alive after close.)
         window.set_hide_on_close(true);
 
         // --- Layout ----------------------------------------------------------
@@ -350,11 +347,9 @@ impl PopupWindow {
                             if !search_entry.has_focus() {
                                 search_entry.grab_focus();
                                 // Insert the character.
-                                let pos = search_entry.text().len() as i32;
-                                search_entry
-                                    .editable()
-                                    .insert_text(&ch.to_string(), &mut pos.clone());
-                                search_entry.editable().set_position(pos + 1);
+                                let mut pos = search_entry.text().len() as i32;
+                                search_entry.insert_text(&ch.to_string(), &mut pos);
+                                search_entry.set_position(pos);
                                 return glib::Propagation::Stop;
                             }
                         }
@@ -415,7 +410,7 @@ fn load_badge_css() {
 
 /// Request a top-biased presentation hint without assuming compositor-managed
 /// placement can be controlled by the client on Wayland.
-fn position_top_center(window: &adw::Window) {
+fn position_top_center(window: &adw::ApplicationWindow) {
     // GTK4 on Wayland does not allow arbitrary window positioning by the
     // client.  On X11 the window manager handles placement.  We set a top
     // margin so that the content at least looks visually top-biased inside

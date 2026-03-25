@@ -3,10 +3,10 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use gtk4 as gtk;
-use gtk::prelude::*;
-use libadwaita as adw;
 use adw::prelude::*;
+use gtk::prelude::*;
+use gtk4 as gtk;
+use libadwaita as adw;
 
 use nixclip_core::config::{Config, Retention};
 
@@ -17,7 +17,8 @@ use nixclip_core::config::{Config, Retention};
 pub fn build_settings_window(
     app: &adw::Application,
     config: Config,
-    on_changed: impl Fn(Config) + 'static + Clone,
+    on_changed: Rc<dyn Fn(Config)>,
+    on_clear_history: Rc<dyn Fn()>,
 ) -> adw::PreferencesWindow {
     let window = adw::PreferencesWindow::new();
     window.set_application(Some(app));
@@ -27,7 +28,12 @@ pub fn build_settings_window(
 
     let state = Rc::new(RefCell::new(config));
 
-    window.add(&build_general_page(&state, on_changed.clone()));
+    window.add(&build_general_page(
+        &window,
+        &state,
+        on_changed.clone(),
+        on_clear_history.clone(),
+    ));
     window.add(&build_privacy_page(&state, on_changed.clone()));
     window.add(&build_about_page(&state));
 
@@ -39,8 +45,10 @@ pub fn build_settings_window(
 // ---------------------------------------------------------------------------
 
 fn build_general_page(
+    window: &adw::PreferencesWindow,
     state: &Rc<RefCell<Config>>,
-    on_changed: impl Fn(Config) + 'static + Clone,
+    on_changed: Rc<dyn Fn(Config)>,
+    on_clear_history: Rc<dyn Fn()>,
 ) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::new();
     page.set_title("General");
@@ -129,6 +137,33 @@ fn build_general_page(
     let clear_btn = gtk::Button::with_label("Clear");
     clear_btn.add_css_class("destructive-action");
     clear_btn.set_valign(gtk::Align::Center);
+    {
+        let window = window.clone();
+        let on_clear_history = on_clear_history.clone();
+        clear_btn.connect_clicked(move |_| {
+            let dialog = adw::MessageDialog::new(
+                Some(&window),
+                Some("Clear All History?"),
+                Some(
+                    "All unpinned clipboard entries will be permanently deleted.\n\
+                     Pinned items will be preserved.",
+                ),
+            );
+            dialog.add_response("cancel", "Cancel");
+            dialog.add_response("clear", "Clear All");
+            dialog.set_response_appearance("clear", adw::ResponseAppearance::Destructive);
+            dialog.set_default_response(Some("cancel"));
+            dialog.set_close_response("cancel");
+
+            let on_clear_history = on_clear_history.clone();
+            dialog.connect_response(None, move |_dialog, response| {
+                if response == "clear" {
+                    on_clear_history();
+                }
+            });
+            dialog.present();
+        });
+    }
     clear_row.add_suffix(&clear_btn);
     clear_row.set_activatable_widget(Some(&clear_btn));
 
@@ -144,7 +179,7 @@ fn build_general_page(
 
 fn build_privacy_page(
     state: &Rc<RefCell<Config>>,
-    on_changed: impl Fn(Config) + 'static + Clone,
+    on_changed: Rc<dyn Fn(Config)>,
 ) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::new();
     page.set_title("Privacy");

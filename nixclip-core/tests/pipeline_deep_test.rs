@@ -49,7 +49,12 @@ fn make_png(width: u32, height: u32) -> Vec<u8> {
     use std::io::Cursor;
 
     let img: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::from_fn(width, height, |x, y| {
-        Rgba([(x * 255 / width.max(1)) as u8, (y * 255 / height.max(1)) as u8, 128, 255])
+        Rgba([
+            (x * 255 / width.max(1)) as u8,
+            (y * 255 / height.max(1)) as u8,
+            128,
+            255,
+        ])
     });
     let mut buf = Vec::new();
     PngEncoder::new(Cursor::new(&mut buf))
@@ -96,8 +101,7 @@ fn priority_image_jpeg_beats_files_and_richtext() {
 /// text/uri-list + text/html + text/plain → Files beats RichText
 #[test]
 fn priority_files_beats_richtext_and_text() {
-    let result =
-        classifier::classify(&mimes(&["text/uri-list", "text/html", "text/plain"]));
+    let result = classifier::classify(&mimes(&["text/uri-list", "text/html", "text/plain"]));
     assert_eq!(result, Some(ContentClass::Files));
 }
 
@@ -134,8 +138,7 @@ fn priority_html_without_plain_is_none() {
 /// require text/plain; html without plain would also be None anyway)
 #[test]
 fn priority_files_with_html_but_no_plain() {
-    let result =
-        classifier::classify(&mimes(&["text/uri-list", "text/html"]));
+    let result = classifier::classify(&mimes(&["text/uri-list", "text/html"]));
     assert_eq!(result, Some(ContentClass::Files));
 }
 
@@ -175,10 +178,7 @@ fn truncation_ascii_one_over_limit_is_truncated() {
     let s = "x".repeat(PREVIEW_LIMIT + 1);
     let entry = ContentProcessor::process(vec![payload("text/plain", s.as_bytes())], None)
         .expect("process");
-    assert_eq!(
-        entry.preview_text.unwrap().chars().count(),
-        PREVIEW_LIMIT
-    );
+    assert_eq!(entry.preview_text.unwrap().chars().count(), PREVIEW_LIMIT);
 }
 
 /// Multi-byte characters: build a string whose byte length > PREVIEW_LIMIT but
@@ -190,8 +190,16 @@ fn truncation_ascii_one_over_limit_is_truncated() {
 fn truncation_multibyte_at_exact_char_limit_not_truncated() {
     // Each 'é' is 2 bytes; PREVIEW_LIMIT of them = PREVIEW_LIMIT chars.
     let s = "é".repeat(PREVIEW_LIMIT);
-    assert_eq!(s.len(), PREVIEW_LIMIT * 2, "sanity: byte length should be 2×limit");
-    assert_eq!(s.chars().count(), PREVIEW_LIMIT, "sanity: char count == limit");
+    assert_eq!(
+        s.len(),
+        PREVIEW_LIMIT * 2,
+        "sanity: byte length should be 2×limit"
+    );
+    assert_eq!(
+        s.chars().count(),
+        PREVIEW_LIMIT,
+        "sanity: char count == limit"
+    );
 
     let entry = ContentProcessor::process(vec![payload("text/plain", s.as_bytes())], None)
         .expect("process");
@@ -285,8 +293,8 @@ fn hash_determinism_different_input_different_hash() {
 #[test]
 fn hash_matches_direct_blake3_of_raw_bytes() {
     let data = b"raw payload bytes";
-    let entry = ContentProcessor::process(vec![payload("text/plain", data)], None)
-        .expect("process");
+    let entry =
+        ContentProcessor::process(vec![payload("text/plain", data)], None).expect("process");
     let expected = *blake3::hash(data).as_bytes();
     assert_eq!(entry.canonical_hash, expected);
 }
@@ -296,7 +304,10 @@ fn hash_richtext_is_over_html_bytes_not_plain() {
     let html_bytes = b"<strong>hash me</strong>";
     let plain_bytes = b"hash me";
     let entry = ContentProcessor::process(
-        vec![payload("text/html", html_bytes), payload("text/plain", plain_bytes)],
+        vec![
+            payload("text/html", html_bytes),
+            payload("text/plain", plain_bytes),
+        ],
         None,
     )
     .expect("process richtext");
@@ -325,9 +336,8 @@ fn hash_image_is_over_raw_bytes() {
 fn hash_files_is_over_uri_list_bytes() {
     let uri_list = b"file:///tmp/a.txt\nfile:///tmp/b.txt\n";
     let expected = *blake3::hash(uri_list).as_bytes();
-    let entry =
-        ContentProcessor::process(vec![payload("text/uri-list", uri_list)], None)
-            .expect("process files");
+    let entry = ContentProcessor::process(vec![payload("text/uri-list", uri_list)], None)
+        .expect("process files");
     assert_eq!(entry.canonical_hash, expected);
 }
 
@@ -339,8 +349,7 @@ fn hash_files_is_over_uri_list_bytes() {
 fn thumbnail_dimensions_64x64_from_small_png() {
     // Source is 1×1.
     let png = make_png(1, 1);
-    let entry =
-        ContentProcessor::process(vec![payload("image/png", &png)], None).expect("process");
+    let entry = ContentProcessor::process(vec![payload("image/png", &png)], None).expect("process");
     let thumb_bytes = entry.thumbnail.expect("thumbnail must be present");
     let (w, h) = png_dimensions(&thumb_bytes);
     assert_eq!((w, h), (64, 64), "thumbnail from 1×1 source must be 64×64");
@@ -350,32 +359,44 @@ fn thumbnail_dimensions_64x64_from_small_png() {
 fn thumbnail_dimensions_64x64_from_large_png() {
     // Source is 512×512.
     let png = make_png(512, 512);
-    let entry =
-        ContentProcessor::process(vec![payload("image/png", &png)], None).expect("process");
+    let entry = ContentProcessor::process(vec![payload("image/png", &png)], None).expect("process");
     let thumb_bytes = entry.thumbnail.expect("thumbnail must be present");
     let (w, h) = png_dimensions(&thumb_bytes);
-    assert_eq!((w, h), (64, 64), "thumbnail from 512×512 source must be 64×64");
+    assert_eq!(
+        (w, h),
+        (64, 64),
+        "thumbnail from 512×512 source must be 64×64"
+    );
 }
 
 #[test]
 fn thumbnail_dimensions_64x64_from_non_square_png() {
     // Source is 200×50 (wide rectangle).
     let png = make_png(200, 50);
-    let entry =
-        ContentProcessor::process(vec![payload("image/png", &png)], None).expect("process");
+    let entry = ContentProcessor::process(vec![payload("image/png", &png)], None).expect("process");
     let thumb_bytes = entry.thumbnail.expect("thumbnail must be present");
     let (w, h) = png_dimensions(&thumb_bytes);
-    assert_eq!((w, h), (64, 64), "thumbnail from non-square source must be exactly 64×64");
+    assert_eq!(
+        (w, h),
+        (64, 64),
+        "thumbnail from non-square source must be exactly 64×64"
+    );
 }
 
 #[test]
 fn thumbnail_original_dimensions_recorded_not_thumb_size() {
     let png = make_png(100, 200);
-    let entry =
-        ContentProcessor::process(vec![payload("image/png", &png)], None).expect("process");
+    let entry = ContentProcessor::process(vec![payload("image/png", &png)], None).expect("process");
     // metadata.image_dimensions must record the ORIGINAL image size.
-    let dims = entry.metadata.image_dimensions.expect("image_dimensions must be set");
-    assert_eq!(dims, (100, 200), "metadata must record original dimensions, not thumbnail size");
+    let dims = entry
+        .metadata
+        .image_dimensions
+        .expect("image_dimensions must be set");
+    assert_eq!(
+        dims,
+        (100, 200),
+        "metadata must record original dimensions, not thumbnail size"
+    );
 }
 
 // ===========================================================================
@@ -402,7 +423,10 @@ fn malformed_png_truncated_header_no_thumbnail() {
     let truncated = b"\x89PNG".to_vec();
     let entry = ContentProcessor::process(vec![payload("image/png", &truncated)], None)
         .expect("truncated PNG must not error at the entry level");
-    assert!(entry.thumbnail.is_none(), "truncated PNG should produce no thumbnail");
+    assert!(
+        entry.thumbnail.is_none(),
+        "truncated PNG should produce no thumbnail"
+    );
     // Raw bytes still stored.
     assert_eq!(entry.representations[0].data, truncated);
 }
@@ -412,15 +436,20 @@ fn malformed_png_random_bytes_no_thumbnail() {
     let garbage: Vec<u8> = (0u8..=255).cycle().take(256).collect();
     let entry = ContentProcessor::process(vec![payload("image/png", &garbage)], None)
         .expect("garbage PNG must not error at the entry level");
-    assert!(entry.thumbnail.is_none(), "random bytes should produce no thumbnail");
+    assert!(
+        entry.thumbnail.is_none(),
+        "random bytes should produce no thumbnail"
+    );
 }
 
 #[test]
 fn malformed_png_valid_header_corrupt_body_no_thumbnail() {
     // Write a valid PNG magic + IHDR chunk header, then corrupt the body.
     let mut data = b"\x89PNG\r\n\x1a\n".to_vec(); // PNG magic
-    // Append junk instead of a real IHDR chunk.
-    data.extend_from_slice(b"\x00\x00\x00\x0dIHDR\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff");
+                                                  // Append junk instead of a real IHDR chunk.
+    data.extend_from_slice(
+        b"\x00\x00\x00\x0dIHDR\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff",
+    );
     let entry = ContentProcessor::process(vec![payload("image/png", &data)], None)
         .expect("corrupt-body PNG must not error at the entry level");
     assert!(entry.thumbnail.is_none());
@@ -430,8 +459,8 @@ fn malformed_png_valid_header_corrupt_body_no_thumbnail() {
 fn malformed_png_hash_still_computed_over_raw_bytes() {
     let garbage: Vec<u8> = (0u8..128).collect();
     let expected_hash = *blake3::hash(&garbage).as_bytes();
-    let entry = ContentProcessor::process(vec![payload("image/png", &garbage)], None)
-        .expect("process");
+    let entry =
+        ContentProcessor::process(vec![payload("image/png", &garbage)], None).expect("process");
     assert_eq!(
         entry.canonical_hash, expected_hash,
         "hash must be over raw bytes even when thumbnail decode fails"
@@ -445,8 +474,8 @@ fn malformed_png_hash_still_computed_over_raw_bytes() {
 #[test]
 fn uri_list_empty_lines_are_skipped() {
     let data = b"\n\n\nfile:///tmp/only.txt\n\n";
-    let entry = ContentProcessor::process(vec![payload("text/uri-list", data)], None)
-        .expect("process");
+    let entry =
+        ContentProcessor::process(vec![payload("text/uri-list", data)], None).expect("process");
     assert_eq!(entry.metadata.file_count, Some(1));
     assert_eq!(entry.preview_text.as_deref(), Some("only.txt"));
 }
@@ -454,19 +483,22 @@ fn uri_list_empty_lines_are_skipped() {
 #[test]
 fn uri_list_comment_lines_are_skipped() {
     let data = b"# This is a comment\n# Another comment\nfile:///home/user/file.txt\n";
-    let entry = ContentProcessor::process(vec![payload("text/uri-list", data)], None)
-        .expect("process");
+    let entry =
+        ContentProcessor::process(vec![payload("text/uri-list", data)], None).expect("process");
     assert_eq!(entry.metadata.file_count, Some(1));
     let preview = entry.preview_text.unwrap();
     assert!(preview.contains("file.txt"));
-    assert!(!preview.contains('#'), "comment lines must not appear in preview");
+    assert!(
+        !preview.contains('#'),
+        "comment lines must not appear in preview"
+    );
 }
 
 #[test]
 fn uri_list_entirely_comments_and_blanks_yields_zero_files() {
     let data = b"# comment 1\n# comment 2\n\n";
-    let entry = ContentProcessor::process(vec![payload("text/uri-list", data)], None)
-        .expect("process");
+    let entry =
+        ContentProcessor::process(vec![payload("text/uri-list", data)], None).expect("process");
     assert_eq!(entry.metadata.file_count, Some(0));
 }
 
@@ -474,8 +506,8 @@ fn uri_list_entirely_comments_and_blanks_yields_zero_files() {
 fn uri_list_non_file_uris_preserved_in_preview_as_is() {
     // Non-file:// URIs should be returned verbatim (spec: unknown scheme → full URI).
     let data = b"https://example.com/resource\nftp://ftp.example.org/file.tar.gz\n";
-    let entry = ContentProcessor::process(vec![payload("text/uri-list", data)], None)
-        .expect("process");
+    let entry =
+        ContentProcessor::process(vec![payload("text/uri-list", data)], None).expect("process");
     assert_eq!(entry.metadata.file_count, Some(2));
     let preview = entry.preview_text.unwrap();
     assert!(
@@ -491,8 +523,8 @@ fn uri_list_non_file_uris_preserved_in_preview_as_is() {
 #[test]
 fn uri_list_percent_encoded_space_in_filename() {
     let data = b"file:///home/user/my%20file.txt\n";
-    let entry = ContentProcessor::process(vec![payload("text/uri-list", data)], None)
-        .expect("process");
+    let entry =
+        ContentProcessor::process(vec![payload("text/uri-list", data)], None).expect("process");
     let preview = entry.preview_text.unwrap();
     assert!(
         preview.contains("my file.txt"),
@@ -503,8 +535,8 @@ fn uri_list_percent_encoded_space_in_filename() {
 #[test]
 fn uri_list_percent_encoded_parentheses_in_filename() {
     let data = b"file:///home/user/report%20%281%29.pdf\n";
-    let entry = ContentProcessor::process(vec![payload("text/uri-list", data)], None)
-        .expect("process");
+    let entry =
+        ContentProcessor::process(vec![payload("text/uri-list", data)], None).expect("process");
     let preview = entry.preview_text.unwrap();
     // %28 = '(', %29 = ')'
     assert!(
@@ -517,8 +549,8 @@ fn uri_list_percent_encoded_parentheses_in_filename() {
 fn uri_list_file_with_localhost_host() {
     // RFC 8089 allows file://localhost/path — the host "localhost" must be stripped.
     let data = b"file://localhost/home/user/doc.txt\n";
-    let entry = ContentProcessor::process(vec![payload("text/uri-list", data)], None)
-        .expect("process");
+    let entry =
+        ContentProcessor::process(vec![payload("text/uri-list", data)], None).expect("process");
     let preview = entry.preview_text.unwrap();
     assert!(
         preview.contains("doc.txt"),
@@ -533,8 +565,8 @@ fn uri_list_file_with_localhost_host() {
 #[test]
 fn uri_list_mixed_comments_blanks_and_real_uris() {
     let data = b"# header\n\nfile:///a.txt\n# mid comment\n\nfile:///b.png\n";
-    let entry = ContentProcessor::process(vec![payload("text/uri-list", data)], None)
-        .expect("process");
+    let entry =
+        ContentProcessor::process(vec![payload("text/uri-list", data)], None).expect("process");
     assert_eq!(entry.metadata.file_count, Some(2));
     let preview = entry.preview_text.unwrap();
     assert!(preview.contains("a.txt"));
@@ -695,8 +727,7 @@ fn privacy_construction_succeeds_with_multiple_valid_patterns() {
 fn richtext_preview_uses_plain_payload_when_present() {
     let html = payload("text/html", b"<p><b>Hello</b> World</p>");
     let plain = payload("text/plain", b"Hello World");
-    let entry =
-        ContentProcessor::process(vec![html, plain], None).expect("process richtext");
+    let entry = ContentProcessor::process(vec![html, plain], None).expect("process richtext");
     assert_eq!(entry.preview_text.as_deref(), Some("Hello World"));
 }
 
@@ -747,7 +778,11 @@ fn richtext_representations_contain_html_and_plain() {
     let html = payload("text/html", b"<p>hi</p>");
     let plain = payload("text/plain", b"hi");
     let entry = ContentProcessor::process(vec![html, plain], None).expect("process");
-    let mimes_stored: Vec<&str> = entry.representations.iter().map(|r| r.mime.as_str()).collect();
+    let mimes_stored: Vec<&str> = entry
+        .representations
+        .iter()
+        .map(|r| r.mime.as_str())
+        .collect();
     assert!(
         mimes_stored.contains(&"text/html"),
         "representations must include text/html"
@@ -783,7 +818,11 @@ fn image_processing_preserves_all_offered_representations() {
     )
     .expect("process");
 
-    let mimes_stored: Vec<&str> = entry.representations.iter().map(|r| r.mime.as_str()).collect();
+    let mimes_stored: Vec<&str> = entry
+        .representations
+        .iter()
+        .map(|r| r.mime.as_str())
+        .collect();
     assert!(mimes_stored.contains(&"image/png"));
     assert!(mimes_stored.contains(&"image/jpeg"));
 }
@@ -801,7 +840,11 @@ fn file_processing_preserves_all_offered_representations() {
     )
     .expect("process");
 
-    let mimes_stored: Vec<&str> = entry.representations.iter().map(|r| r.mime.as_str()).collect();
+    let mimes_stored: Vec<&str> = entry
+        .representations
+        .iter()
+        .map(|r| r.mime.as_str())
+        .collect();
     assert!(mimes_stored.contains(&"text/uri-list"));
     assert!(mimes_stored.contains(&"x-special/gnome-copied-files"));
 }
@@ -813,8 +856,7 @@ fn file_processing_preserves_all_offered_representations() {
 /// localhost — no scheme, no dot; must NOT be detected as a URL.
 #[test]
 fn url_detect_localhost_without_scheme_is_text() {
-    let result =
-        classifier::classify_with_content(&mimes(&["text/plain"]), Some("localhost"));
+    let result = classifier::classify_with_content(&mimes(&["text/plain"]), Some("localhost"));
     assert_eq!(
         result,
         Some(ContentClass::Text),
@@ -825,10 +867,8 @@ fn url_detect_localhost_without_scheme_is_text() {
 /// localhost with scheme IS a URL.
 #[test]
 fn url_detect_localhost_with_http_scheme_is_url() {
-    let result = classifier::classify_with_content(
-        &mimes(&["text/plain"]),
-        Some("http://localhost"),
-    );
+    let result =
+        classifier::classify_with_content(&mimes(&["text/plain"]), Some("http://localhost"));
     assert_eq!(result, Some(ContentClass::Url));
 }
 
@@ -859,10 +899,7 @@ fn url_detect_ipv4_with_http_scheme_is_url() {
 fn url_detect_bare_ipv4_classification() {
     // The current heuristic treats "192.168.1.1" as a valid dot-separated
     // string of alphanumeric segments, so it IS promoted to Url.
-    let result = classifier::classify_with_content(
-        &mimes(&["text/plain"]),
-        Some("192.168.1.1"),
-    );
+    let result = classifier::classify_with_content(&mimes(&["text/plain"]), Some("192.168.1.1"));
     assert_eq!(
         result,
         Some(ContentClass::Url),
@@ -917,10 +954,8 @@ fn url_detect_text_containing_url_not_promoted() {
 /// URL with subdomain.
 #[test]
 fn url_detect_subdomain_url() {
-    let result = classifier::classify_with_content(
-        &mimes(&["text/plain"]),
-        Some("sub.example.co.uk/path"),
-    );
+    let result =
+        classifier::classify_with_content(&mimes(&["text/plain"]), Some("sub.example.co.uk/path"));
     assert_eq!(result, Some(ContentClass::Url));
 }
 
@@ -944,7 +979,10 @@ fn url_domain_extraction_strips_port() {
 #[test]
 fn url_domain_extraction_strips_query_and_path() {
     let entry = ContentProcessor::process(
-        vec![payload("text/plain", b"https://api.example.com/v1/data?token=abc")],
+        vec![payload(
+            "text/plain",
+            b"https://api.example.com/v1/data?token=abc",
+        )],
         None,
     )
     .expect("process");
@@ -957,20 +995,15 @@ fn url_domain_extraction_strips_query_and_path() {
 /// A single plain word without a dot is plain Text.
 #[test]
 fn url_detect_single_word_no_dot_is_text() {
-    let result = classifier::classify_with_content(
-        &mimes(&["text/plain"]),
-        Some("notaurl"),
-    );
+    let result = classifier::classify_with_content(&mimes(&["text/plain"]), Some("notaurl"));
     assert_eq!(result, Some(ContentClass::Text));
 }
 
 /// An email address is NOT a URL (the `@` character breaks the segment rules).
 #[test]
 fn url_detect_email_is_not_url() {
-    let result = classifier::classify_with_content(
-        &mimes(&["text/plain"]),
-        Some("user@example.com"),
-    );
+    let result =
+        classifier::classify_with_content(&mimes(&["text/plain"]), Some("user@example.com"));
     // "user@example" contains '@' which is not alphanumeric/hyphen/underscore,
     // so the heuristic should reject it as a bare domain.
     assert_eq!(
@@ -984,10 +1017,8 @@ fn url_detect_email_is_not_url() {
 /// before URL detection.
 #[test]
 fn url_detect_trims_whitespace_before_check() {
-    let result = classifier::classify_with_content(
-        &mimes(&["text/plain"]),
-        Some("  https://example.com  "),
-    );
+    let result =
+        classifier::classify_with_content(&mimes(&["text/plain"]), Some("  https://example.com  "));
     assert_eq!(
         result,
         Some(ContentClass::Url),

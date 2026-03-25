@@ -3,9 +3,9 @@
 
 use tracing::{debug, warn};
 
-use crate::{ContentClass, EntryMetadata, MimePayload, ProcessedEntry};
-use crate::error::{NixClipError, Result};
 use super::classifier;
+use crate::error::{NixClipError, Result};
+use crate::{ContentClass, EntryMetadata, MimePayload, ProcessedEntry};
 
 /// Maximum number of *characters* (not bytes) kept in `preview_text`.
 const PREVIEW_CHAR_LIMIT: usize = 32_768;
@@ -22,10 +22,7 @@ impl ContentProcessor {
     /// Classification is performed with [`classifier::classify_with_content`]
     /// using the `text/plain` payload (if present) to allow URL promotion.
     /// Each content class is then dispatched to a dedicated internal handler.
-    pub fn process(
-        offers: Vec<MimePayload>,
-        source_app: Option<String>,
-    ) -> Result<ProcessedEntry> {
+    pub fn process(offers: Vec<MimePayload>, source_app: Option<String>) -> Result<ProcessedEntry> {
         let offered_mimes: Vec<String> = offers.iter().map(|p| p.mime.clone()).collect();
 
         // Peek at plain text content for URL promotion.
@@ -34,13 +31,11 @@ impl ContentProcessor {
             .find(|p| p.mime == "text/plain")
             .map(|p| String::from_utf8_lossy(&p.data).into_owned());
 
-        let content_class = classifier::classify_with_content(
-            &offered_mimes,
-            plain_text_preview.as_deref(),
-        )
-        .ok_or_else(|| {
-            NixClipError::Pipeline("no recognised MIME type in clipboard offer".to_string())
-        })?;
+        let content_class =
+            classifier::classify_with_content(&offered_mimes, plain_text_preview.as_deref())
+                .ok_or_else(|| {
+                    NixClipError::Pipeline("no recognised MIME type in clipboard offer".to_string())
+                })?;
 
         debug!(%content_class, "classified clipboard content");
 
@@ -156,7 +151,7 @@ impl ContentProcessor {
         })
     }
 
-    /// Decode the image, generate a 120×120 PNG thumbnail, and record dimensions.
+    /// Decode the image, generate a 64×64 PNG thumbnail, and record dimensions.
     ///
     /// If decoding fails, the error is logged and processing continues without
     /// a thumbnail. The raw bytes are always stored.
@@ -185,14 +180,14 @@ impl ContentProcessor {
         let canonical_hash = *blake3::hash(&payload.data).as_bytes();
 
         // Attempt to decode; failures are non-fatal — we still store the raw bytes.
-        let (thumbnail, image_dimensions) =
-            match Self::decode_and_thumbnail(&payload.data, format) {
-                Ok((thumb, dims)) => (Some(thumb), Some(dims)),
-                Err(e) => {
-                    warn!(error = %e, "image decode failed; storing raw bytes without thumbnail");
-                    (None, None)
-                }
-            };
+        let (thumbnail, image_dimensions) = match Self::decode_and_thumbnail(&payload.data, format)
+        {
+            Ok((thumb, dims)) => (Some(thumb), Some(dims)),
+            Err(e) => {
+                warn!(error = %e, "image decode failed; storing raw bytes without thumbnail");
+                (None, None)
+            }
+        };
 
         Ok(ProcessedEntry {
             content_class: ContentClass::Image,
@@ -207,17 +202,19 @@ impl ContentProcessor {
         })
     }
 
-    /// Decode image bytes and produce a 120x120 PNG thumbnail (aspect-ratio
-    /// preserving).
+    /// Decode image bytes and produce an exact 64x64 PNG thumbnail.
+    ///
+    /// The source image is resized to fit within 64x64 while preserving its
+    /// aspect ratio, then centered on a transparent 64x64 canvas.
     ///
     /// Separated so that the caller can catch errors without panicking.
     fn decode_and_thumbnail(
         data: &[u8],
         format: image::ImageFormat,
     ) -> std::result::Result<(Vec<u8>, (u32, u32)), NixClipError> {
-        use image::imageops::FilterType;
-        use image::ImageEncoder;
         use image::codecs::png::PngEncoder;
+        use image::imageops::FilterType;
+        use image::{ImageEncoder, Rgba, RgbaImage};
         use std::io::Cursor;
 
         let img = image::load_from_memory_with_format(data, format)
@@ -225,25 +222,19 @@ impl ContentProcessor {
 
         let (width, height) = (img.width(), img.height());
 
-        // Generate a thumbnail that fits within 120x120 while preserving the
-        // original aspect ratio.  `DynamicImage::resize` (unlike
-        // `imageops::resize`) respects the aspect ratio automatically.
-        let thumbnail = img.resize(120, 120, FilterType::Lanczos3);
-        // Convert to Rgba8 to guarantee a consistent pixel format for PNG encoding.
-        let rgba = thumbnail.to_rgba8();
-        let thumb_w = rgba.width();
-        let thumb_h = rgba.height();
+        let resized = img.resize(64, 64, FilterType::Lanczos3).to_rgba8();
+        let resized_w = resized.width();
+        let resized_h = resized.height();
+        let mut canvas = RgbaImage::from_pixel(64, 64, Rgba([0, 0, 0, 0]));
+        let offset_x = ((64 - resized_w) / 2) as i64;
+        let offset_y = ((64 - resized_h) / 2) as i64;
+        image::imageops::overlay(&mut canvas, &resized, offset_x, offset_y);
 
         // Encode thumbnail as PNG into a Vec<u8>.
         let mut png_bytes: Vec<u8> = Vec::new();
         let encoder = PngEncoder::new(Cursor::new(&mut png_bytes));
         encoder
-            .write_image(
-                rgba.as_raw(),
-                thumb_w,
-                thumb_h,
-                image::ExtendedColorType::Rgba8,
-            )
+            .write_image(canvas.as_raw(), 64, 64, image::ExtendedColorType::Rgba8)
             .map_err(|e| NixClipError::Image(format!("failed to encode thumbnail: {e}")))?;
 
         Ok((png_bytes, (width, height)))
@@ -255,7 +246,11 @@ impl ContentProcessor {
         let payload = offers
             .iter()
             .find(|p| p.mime == "text/uri-list")
-            .or_else(|| offers.iter().find(|p| p.mime == "x-special/gnome-copied-files"))
+            .or_else(|| {
+                offers
+                    .iter()
+                    .find(|p| p.mime == "x-special/gnome-copied-files")
+            })
             .ok_or_else(|| {
                 NixClipError::Pipeline("files MIME listed but no payload found".to_string())
             })?;
@@ -383,7 +378,9 @@ fn percent_decode(s: &str) -> String {
                 out.push(h2);
             } else {
                 out.push('%');
-                if let Some(h) = h1 { out.push(h); }
+                if let Some(h) = h1 {
+                    out.push(h);
+                }
             }
         } else {
             out.push(c);
@@ -528,7 +525,10 @@ mod tests {
         let entry = ContentProcessor::process(vec![payload], None).unwrap();
         assert_eq!(entry.content_class, ContentClass::Text);
         assert_eq!(entry.preview_text.as_deref(), Some("hello world"));
-        assert_eq!(entry.canonical_hash, *blake3::hash(b"hello world").as_bytes());
+        assert_eq!(
+            entry.canonical_hash,
+            *blake3::hash(b"hello world").as_bytes()
+        );
     }
 
     #[test]
@@ -550,10 +550,7 @@ mod tests {
         let payload = make_payload("text/plain", b"https://example.com/path?q=1");
         let entry = ContentProcessor::process(vec![payload], None).unwrap();
         assert_eq!(entry.content_class, ContentClass::Url);
-        assert_eq!(
-            entry.metadata.url_domain.as_deref(),
-            Some("example.com")
-        );
+        assert_eq!(entry.metadata.url_domain.as_deref(), Some("example.com"));
     }
 
     // --- process_files ---

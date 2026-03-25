@@ -2,12 +2,12 @@
 //! background tokio runtime for communicating with the nixclipd daemon.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use gtk4::glib;
 use tokio::net::UnixStream;
 use tokio::sync::mpsc;
 
+use nixclip_core::config::Config;
 use nixclip_core::ipc::{self, ClientMessage, ServerMessage};
 use nixclip_core::{ContentClass, EntryId, RestoreMode};
 
@@ -18,9 +18,10 @@ use nixclip_core::{ContentClass, EntryId, RestoreMode};
 /// A request sent from the GLib thread to the background tokio runtime.
 struct IpcRequest {
     message: ClientMessage,
-    /// Sender that lives on the GLib side; the background thread sends the raw
-    /// response back through it.
-    reply: glib::Sender<Result<ServerMessage, String>>,
+    /// Oneshot sender used by the background thread to deliver the response.
+    /// The receiver is awaited inside a `glib::spawn_future_local` task on the
+    /// GLib main loop, which then invokes the user callback.
+    reply: tokio::sync::oneshot::Sender<Result<ServerMessage, String>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -74,17 +75,10 @@ impl UiIpcClient {
         limit: u32,
         callback: impl Fn(Result<(Vec<nixclip_core::EntrySummary>, u32), String>) + 'static,
     ) {
-        let msg = ClientMessage::query(
-            text,
-            class.map(|c| c.as_str().to_string()),
-            0,
-            limit,
-        );
+        let msg = ClientMessage::query(text, class.map(|c| c.as_str().to_string()), 0, limit);
 
         self.send(msg, move |res| match res {
-            Ok(ServerMessage::QueryResult { entries, total, .. }) => {
-                callback(Ok((entries, total)))
-            }
+            Ok(ServerMessage::QueryResult { entries, total, .. }) => callback(Ok((entries, total))),
             Ok(ServerMessage::Error { message, .. }) => callback(Err(message)),
             Ok(other) => callback(Err(format!("unexpected response: {other:?}"))),
             Err(e) => callback(Err(e)),
@@ -115,11 +109,7 @@ impl UiIpcClient {
     }
 
     /// Delete a clipboard entry.
-    pub fn delete(
-        &self,
-        id: EntryId,
-        callback: impl Fn(Result<(), String>) + 'static,
-    ) {
+    pub fn delete(&self, id: EntryId, callback: impl Fn(Result<(), String>) + 'static) {
         let msg = ClientMessage::delete(vec![id]);
 
         self.send(msg, move |res| match res {
@@ -131,12 +121,7 @@ impl UiIpcClient {
     }
 
     /// Pin or unpin a clipboard entry.
-    pub fn pin(
-        &self,
-        id: EntryId,
-        pinned: bool,
-        callback: impl Fn(Result<(), String>) + 'static,
-    ) {
+    pub fn pin(&self, id: EntryId, pinned: bool, callback: impl Fn(Result<(), String>) + 'static) {
         let msg = ClientMessage::pin(id, pinned);
 
         self.send(msg, move |res| match res {
@@ -148,14 +133,42 @@ impl UiIpcClient {
     }
 
     /// Clear all unpinned entries.
-    pub fn clear_unpinned(
-        &self,
-        callback: impl Fn(Result<(), String>) + 'static,
-    ) {
+    pub fn clear_unpinned(&self, callback: impl Fn(Result<(), String>) + 'static) {
         let msg = ClientMessage::clear_unpinned();
 
         self.send(msg, move |res| match res {
             Ok(ServerMessage::Ok { .. }) => callback(Ok(())),
+            Ok(ServerMessage::Error { message, .. }) => callback(Err(message)),
+            Ok(other) => callback(Err(format!("unexpected response: {other:?}"))),
+            Err(e) => callback(Err(e)),
+        });
+    }
+
+    /// Fetch the daemon's current configuration.
+    pub fn get_config(&self, callback: impl Fn(Result<Config, String>) + 'static) {
+        let msg = ClientMessage::get_config();
+
+        self.send(msg, move |res| match res {
+            Ok(ServerMessage::ConfigValue { config, .. }) => callback(Ok(config)),
+            Ok(ServerMessage::Error { message, .. }) => callback(Err(message)),
+            Ok(other) => callback(Err(format!("unexpected response: {other:?}"))),
+            Err(e) => callback(Err(e)),
+        });
+    }
+
+    /// Apply a full configuration value through the daemon's `SetConfig` path.
+    pub fn set_config(&self, config: Config, callback: impl Fn(Result<Config, String>) + 'static) {
+        let patch = match toml::Value::try_from(config) {
+            Ok(value) => value,
+            Err(error) => {
+                callback(Err(format!("failed to serialize config: {error}")));
+                return;
+            }
+        };
+        let msg = ClientMessage::set_config(patch);
+
+        self.send(msg, move |res| match res {
+            Ok(ServerMessage::ConfigValue { config, .. }) => callback(Ok(config)),
             Ok(ServerMessage::Error { message, .. }) => callback(Err(message)),
             Ok(other) => callback(Err(format!("unexpected response: {other:?}"))),
             Err(e) => callback(Err(e)),
@@ -173,19 +186,19 @@ impl UiIpcClient {
         message: ClientMessage,
         callback: impl Fn(Result<ServerMessage, String>) + 'static,
     ) {
-        let (glib_tx, glib_rx) = glib::MainContext::channel::<Result<ServerMessage, String>>(
-            glib::Priority::DEFAULT,
-        );
+        let (tx, rx) = tokio::sync::oneshot::channel::<Result<ServerMessage, String>>();
 
-        // Attach receiver to GLib main loop.
-        glib_rx.attach(None, move |result| {
-            callback(result);
-            glib::ControlFlow::Break
+        // Await the response on the GLib main loop so the callback (which
+        // captures non-Send Rc types) runs on the UI thread.
+        glib::spawn_future_local(async move {
+            if let Ok(result) = rx.await {
+                callback(result);
+            }
         });
 
         let req = IpcRequest {
             message,
-            reply: glib_tx,
+            reply: tx,
         };
 
         if self.request_tx.send(req).is_err() {
@@ -208,20 +221,18 @@ async fn ipc_loop(socket_path: PathBuf, mut rx: mpsc::UnboundedReceiver<IpcReque
         // Ensure we have a live connection.
         let conn = match &mut stream {
             Some(s) => s,
-            None => {
-                match UnixStream::connect(&socket_path).await {
-                    Ok(s) => {
-                        stream = Some(s);
-                        stream.as_mut().unwrap()
-                    }
-                    Err(e) => {
-                        let msg = format!("cannot connect to daemon: {e}");
-                        tracing::warn!("{}", msg);
-                        let _ = req.reply.send(Err(msg));
-                        continue;
-                    }
+            None => match UnixStream::connect(&socket_path).await {
+                Ok(s) => {
+                    stream = Some(s);
+                    stream.as_mut().unwrap()
                 }
-            }
+                Err(e) => {
+                    let msg = format!("cannot connect to daemon: {e}");
+                    tracing::warn!("{}", msg);
+                    let _ = req.reply.send(Err(msg));
+                    continue;
+                }
+            },
         };
 
         // Split the stream for reading and writing.

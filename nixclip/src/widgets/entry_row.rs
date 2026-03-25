@@ -1,7 +1,7 @@
+use gtk::prelude::*;
 use gtk4 as gtk;
 use gtk4::gdk;
 use gtk4::glib;
-use gtk::prelude::*;
 use nixclip_core::{ContentClass, EntrySummary};
 
 /// A single row in the clipboard history list.
@@ -47,10 +47,7 @@ impl EntryRow {
             }
         } else {
             // Text-based preview: up to 2 lines, ellipsized.
-            let preview_text = entry
-                .preview_text
-                .as_deref()
-                .unwrap_or("[No preview]");
+            let preview_text = entry.preview_text.as_deref().unwrap_or("[No preview]");
             let preview = gtk::Label::new(Some(preview_text));
             preview.set_halign(gtk::Align::Start);
             preview.set_ellipsize(gtk::pango::EllipsizeMode::End);
@@ -123,11 +120,8 @@ fn build_badge(class: ContentClass) -> gtk::Label {
 fn build_thumbnail(data: &[u8]) -> Option<gtk::Picture> {
     let bytes = glib::Bytes::from(data);
     let stream = gtk4::gio::MemoryInputStream::from_bytes(&bytes);
-    let pixbuf = gdk::gdk_pixbuf::Pixbuf::from_stream(
-        &stream,
-        gtk4::gio::Cancellable::NONE,
-    )
-    .ok()?;
+    let pixbuf =
+        gdk::gdk_pixbuf::Pixbuf::from_stream(&stream, gtk4::gio::Cancellable::NONE).ok()?;
 
     let texture = gdk::Texture::for_pixbuf(&pixbuf);
     let picture = gtk::Picture::for_paintable(&texture);
@@ -159,19 +153,35 @@ pub fn format_relative_time(millis: i64) -> String {
         0..=59 => "just now".to_string(),
         60..=3599 => {
             let m = diff / 60;
-            if m == 1 { "1m".to_string() } else { format!("{m}m") }
+            if m == 1 {
+                "1m".to_string()
+            } else {
+                format!("{m}m")
+            }
         }
         3600..=86399 => {
             let h = diff / 3600;
-            if h == 1 { "1h".to_string() } else { format!("{h}h") }
+            if h == 1 {
+                "1h".to_string()
+            } else {
+                format!("{h}h")
+            }
         }
         86400..=2591999 => {
             let d = diff / 86400;
-            if d == 1 { "1d".to_string() } else { format!("{d}d") }
+            if d == 1 {
+                "1d".to_string()
+            } else {
+                format!("{d}d")
+            }
         }
         _ => {
             let w = diff / 604800;
-            if w == 1 { "1w".to_string() } else { format!("{w}w") }
+            if w == 1 {
+                "1w".to_string()
+            } else {
+                format!("{w}w")
+            }
         }
     }
 }

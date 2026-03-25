@@ -11,9 +11,9 @@
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::{EntrySummary, EntryId, RestoreMode};
 use crate::config::Config;
 use crate::error::{NixClipError, Result};
+use crate::{EntryId, EntrySummary, RestoreMode};
 
 /// Wire-protocol version advertised by this build.
 pub const PROTOCOL_VERSION: u32 = 1;
@@ -53,7 +53,11 @@ pub enum ClientMessage {
     Delete { version: u32, ids: Vec<EntryId> },
 
     /// Pin or unpin a single history entry.
-    Pin { version: u32, id: EntryId, pinned: bool },
+    Pin {
+        version: u32,
+        id: EntryId,
+        pinned: bool,
+    },
 
     /// Remove every unpinned entry from the history.
     ClearUnpinned { version: u32 },
@@ -71,7 +75,9 @@ pub enum ClientMessage {
 impl ClientMessage {
     /// Construct a versioned `Subscribe` message.
     pub fn subscribe() -> Self {
-        Self::Subscribe { version: PROTOCOL_VERSION }
+        Self::Subscribe {
+            version: PROTOCOL_VERSION,
+        }
     }
 
     /// Construct a versioned `Query` message.
@@ -92,37 +98,58 @@ impl ClientMessage {
 
     /// Construct a versioned `Restore` message.
     pub fn restore(id: EntryId, mode: RestoreMode) -> Self {
-        Self::Restore { version: PROTOCOL_VERSION, id, mode }
+        Self::Restore {
+            version: PROTOCOL_VERSION,
+            id,
+            mode,
+        }
     }
 
     /// Construct a versioned `Delete` message.
     pub fn delete(ids: Vec<EntryId>) -> Self {
-        Self::Delete { version: PROTOCOL_VERSION, ids }
+        Self::Delete {
+            version: PROTOCOL_VERSION,
+            ids,
+        }
     }
 
     /// Construct a versioned `Pin` message.
     pub fn pin(id: EntryId, pinned: bool) -> Self {
-        Self::Pin { version: PROTOCOL_VERSION, id, pinned }
+        Self::Pin {
+            version: PROTOCOL_VERSION,
+            id,
+            pinned,
+        }
     }
 
     /// Construct a versioned `ClearUnpinned` message.
     pub fn clear_unpinned() -> Self {
-        Self::ClearUnpinned { version: PROTOCOL_VERSION }
+        Self::ClearUnpinned {
+            version: PROTOCOL_VERSION,
+        }
     }
 
     /// Construct a versioned `GetConfig` message.
     pub fn get_config() -> Self {
-        Self::GetConfig { version: PROTOCOL_VERSION }
+        Self::GetConfig {
+            version: PROTOCOL_VERSION,
+        }
     }
 
     /// Construct a versioned `SetConfig` message.
     pub fn set_config(patch: toml::Value) -> Self {
-        Self::SetConfig { version: PROTOCOL_VERSION, patch }
+        Self::SetConfig {
+            version: PROTOCOL_VERSION,
+            patch,
+        }
     }
 
     /// Construct a versioned `GetEntry` message.
     pub fn get_entry(id: EntryId) -> Self {
-        Self::GetEntry { version: PROTOCOL_VERSION, id }
+        Self::GetEntry {
+            version: PROTOCOL_VERSION,
+            id,
+        }
     }
 
     /// Return the `version` field regardless of the variant.
@@ -185,12 +212,19 @@ pub enum ServerMessage {
 impl ServerMessage {
     /// Construct a versioned `NewEntry` message.
     pub fn new_entry(entry: EntrySummary) -> Self {
-        Self::NewEntry { version: PROTOCOL_VERSION, entry }
+        Self::NewEntry {
+            version: PROTOCOL_VERSION,
+            entry,
+        }
     }
 
     /// Construct a versioned `QueryResult` message.
     pub fn query_result(entries: Vec<EntrySummary>, total: u32) -> Self {
-        Self::QueryResult { version: PROTOCOL_VERSION, entries, total }
+        Self::QueryResult {
+            version: PROTOCOL_VERSION,
+            entries,
+            total,
+        }
     }
 
     /// Construct a versioned `RestoreResult` message indicating success.
@@ -213,22 +247,33 @@ impl ServerMessage {
 
     /// Construct a versioned `ConfigValue` message.
     pub fn config_value(config: Config) -> Self {
-        Self::ConfigValue { version: PROTOCOL_VERSION, config }
+        Self::ConfigValue {
+            version: PROTOCOL_VERSION,
+            config,
+        }
     }
 
     /// Construct a versioned `EntryDetail` message.
     pub fn entry_detail(entry: Option<EntrySummary>) -> Self {
-        Self::EntryDetail { version: PROTOCOL_VERSION, entry }
+        Self::EntryDetail {
+            version: PROTOCOL_VERSION,
+            entry,
+        }
     }
 
     /// Construct a versioned `Error` message.
     pub fn error(message: impl Into<String>) -> Self {
-        Self::Error { version: PROTOCOL_VERSION, message: message.into() }
+        Self::Error {
+            version: PROTOCOL_VERSION,
+            message: message.into(),
+        }
     }
 
     /// Construct a versioned `Ok` message.
     pub fn ok() -> Self {
-        Self::Ok { version: PROTOCOL_VERSION }
+        Self::Ok {
+            version: PROTOCOL_VERSION,
+        }
     }
 
     /// Return the `version` field regardless of the variant.
@@ -254,16 +299,14 @@ impl ServerMessage {
 /// Named-field encoding keeps the format forward-compatible: receivers that
 /// do not know a field will simply ignore it.
 pub fn encode_message<T: Serialize>(msg: &T) -> Result<Vec<u8>> {
-    rmp_serde::to_vec_named(msg).map_err(|e| {
-        NixClipError::Serialization(format!("encode failed: {e}"))
-    })
+    rmp_serde::to_vec_named(msg)
+        .map_err(|e| NixClipError::Serialization(format!("encode failed: {e}")))
 }
 
 /// Deserialize a MessagePack byte slice into `T`.
 pub fn decode_message<T: DeserializeOwned>(data: &[u8]) -> Result<T> {
-    rmp_serde::from_slice(data).map_err(|e| {
-        NixClipError::Serialization(format!("decode failed: {e}"))
-    })
+    rmp_serde::from_slice(data)
+        .map_err(|e| NixClipError::Serialization(format!("decode failed: {e}")))
 }
 
 // ---------------------------------------------------------------------------
@@ -396,21 +439,27 @@ mod tests {
         let msg = ClientMessage::subscribe();
         let encoded = encode_message(&msg).expect("encode");
         let decoded: ClientMessage = decode_message(&encoded).expect("decode");
-        assert!(matches!(decoded, ClientMessage::Subscribe { version: PROTOCOL_VERSION }));
+        assert!(matches!(
+            decoded,
+            ClientMessage::Subscribe {
+                version: PROTOCOL_VERSION
+            }
+        ));
     }
 
     #[test]
     fn client_message_query_round_trip() {
-        let msg = ClientMessage::query(
-            Some("hello".into()),
-            Some("text".into()),
-            0,
-            20,
-        );
+        let msg = ClientMessage::query(Some("hello".into()), Some("text".into()), 0, 20);
         let encoded = encode_message(&msg).expect("encode");
         let decoded: ClientMessage = decode_message(&encoded).expect("decode");
         match decoded {
-            ClientMessage::Query { text, content_class, offset, limit, .. } => {
+            ClientMessage::Query {
+                text,
+                content_class,
+                offset,
+                limit,
+                ..
+            } => {
                 assert_eq!(text.as_deref(), Some("hello"));
                 assert_eq!(content_class.as_deref(), Some("text"));
                 assert_eq!(offset, 0);
@@ -425,7 +474,12 @@ mod tests {
         let msg = ServerMessage::ok();
         let encoded = encode_message(&msg).expect("encode");
         let decoded: ServerMessage = decode_message(&encoded).expect("decode");
-        assert!(matches!(decoded, ServerMessage::Ok { version: PROTOCOL_VERSION }));
+        assert!(matches!(
+            decoded,
+            ServerMessage::Ok {
+                version: PROTOCOL_VERSION
+            }
+        ));
     }
 
     #[test]
@@ -475,7 +529,9 @@ mod tests {
         // Empty stream -- peer closed connection before writing anything.
         let buf: Vec<u8> = Vec::new();
         let mut cursor = std::io::Cursor::new(buf);
-        let err = read_frame(&mut cursor).await.expect_err("should be EOF error");
+        let err = read_frame(&mut cursor)
+            .await
+            .expect_err("should be EOF error");
         assert!(
             matches!(err, NixClipError::Ipc(ref s) if s.contains("connection closed")),
             "unexpected error: {err}",
@@ -490,7 +546,9 @@ mod tests {
         let buf = oversized_len.to_be_bytes().to_vec();
 
         let mut cursor = std::io::Cursor::new(buf);
-        let err = read_frame(&mut cursor).await.expect_err("should be too-large error");
+        let err = read_frame(&mut cursor)
+            .await
+            .expect_err("should be too-large error");
         assert!(
             matches!(err, NixClipError::Ipc(ref s) if s.contains("frame too large")),
             "unexpected error: {err}",
@@ -502,7 +560,9 @@ mod tests {
         // Allocate MAX_FRAME_SIZE + 1 bytes and confirm write_frame rejects it.
         let big: Vec<u8> = vec![0u8; (MAX_FRAME_SIZE + 1) as usize];
         let mut buf: Vec<u8> = Vec::new();
-        let err = write_frame(&mut buf, &big).await.expect_err("should reject oversized");
+        let err = write_frame(&mut buf, &big)
+            .await
+            .expect_err("should reject oversized");
         assert!(
             matches!(err, NixClipError::Ipc(ref s) if s.contains("frame too large")),
             "unexpected error: {err}",
@@ -519,7 +579,9 @@ mod tests {
         let received: ClientMessage = recv_message(&mut cursor).await.expect("recv_message");
         assert!(matches!(
             received,
-            ClientMessage::ClearUnpinned { version: PROTOCOL_VERSION }
+            ClientMessage::ClearUnpinned {
+                version: PROTOCOL_VERSION
+            }
         ));
     }
 
@@ -575,7 +637,10 @@ mod tests {
         let encoded = encode_message(&msg).expect("encode");
         let decoded: ClientMessage = decode_message(&encoded).expect("decode");
         match decoded {
-            ClientMessage::SetConfig { patch: decoded_patch, .. } => {
+            ClientMessage::SetConfig {
+                patch: decoded_patch,
+                ..
+            } => {
                 assert_eq!(decoded_patch, patch);
             }
             other => panic!("unexpected variant: {other:?}"),
@@ -588,7 +653,13 @@ mod tests {
         let encoded = encode_message(&msg).expect("encode");
         let decoded: ClientMessage = decode_message(&encoded).expect("decode");
         match decoded {
-            ClientMessage::Query { text, content_class, offset, limit, .. } => {
+            ClientMessage::Query {
+                text,
+                content_class,
+                offset,
+                limit,
+                ..
+            } => {
                 assert!(text.is_none());
                 assert!(content_class.is_none());
                 assert_eq!(offset, 10);

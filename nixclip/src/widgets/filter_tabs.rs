@@ -1,5 +1,5 @@
-use gtk4 as gtk;
 use gtk::prelude::*;
+use gtk4 as gtk;
 use nixclip_core::ContentClass;
 
 use std::cell::RefCell;
@@ -64,17 +64,16 @@ impl FilterTabs {
         let callback = Rc::new(callback);
         let active = self.active_filter.clone();
 
-        let wire_button =
-            |btn: &gtk::ToggleButton, class: Option<ContentClass>| {
-                let cb = callback.clone();
-                let active = active.clone();
-                btn.connect_toggled(move |b| {
-                    if b.is_active() {
-                        *active.borrow_mut() = class;
-                        cb(class);
-                    }
-                });
-            };
+        let wire_button = |btn: &gtk::ToggleButton, class: Option<ContentClass>| {
+            let cb = callback.clone();
+            let active = active.clone();
+            btn.connect_toggled(move |b| {
+                if b.is_active() {
+                    *active.borrow_mut() = class;
+                    cb(class);
+                }
+            });
+        };
 
         wire_button(&self.btn_all, None);
         wire_button(&self.btn_text, Some(ContentClass::Text));

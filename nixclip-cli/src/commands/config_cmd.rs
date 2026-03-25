@@ -11,11 +11,7 @@ pub enum ConfigAction {
     Set { key: String, value: String },
 }
 
-pub async fn run(
-    client: &mut IpcClient,
-    action: Option<ConfigAction>,
-    json: bool,
-) -> Result<()> {
+pub async fn run(client: &mut IpcClient, action: Option<ConfigAction>, json: bool) -> Result<()> {
     match action {
         None => {
             // Retrieve and display the current config.

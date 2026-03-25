@@ -1,7 +1,7 @@
+use nixclip_core::config::IgnoreConfig;
 /// Integration tests for the pipeline: classifier, ContentProcessor, PrivacyFilter.
 use nixclip_core::pipeline::classifier;
 use nixclip_core::pipeline::{ContentProcessor, PrivacyFilter};
-use nixclip_core::config::IgnoreConfig;
 use nixclip_core::{ContentClass, MimePayload};
 
 // ---------------------------------------------------------------------------
@@ -110,19 +110,13 @@ fn classify_with_content_promotes_http_url() {
 
 #[test]
 fn classify_with_content_promotes_bare_domain() {
-    let result = classifier::classify_with_content(
-        &mimes(&["text/plain"]),
-        Some("example.com"),
-    );
+    let result = classifier::classify_with_content(&mimes(&["text/plain"]), Some("example.com"));
     assert_eq!(result, Some(ContentClass::Url));
 }
 
 #[test]
 fn classify_with_content_no_promotion_for_whitespace() {
-    let result = classifier::classify_with_content(
-        &mimes(&["text/plain"]),
-        Some("hello world"),
-    );
+    let result = classifier::classify_with_content(&mimes(&["text/plain"]), Some("hello world"));
     assert_eq!(result, Some(ContentClass::Text));
 }
 
@@ -203,7 +197,10 @@ fn processor_url_extracts_domain_https() {
     let payload = make_payload("text/plain", b"https://www.rust-lang.org/tools/install");
     let entry = ContentProcessor::process(vec![payload], None).expect("process");
     assert_eq!(entry.content_class, ContentClass::Url);
-    assert_eq!(entry.metadata.url_domain.as_deref(), Some("www.rust-lang.org"));
+    assert_eq!(
+        entry.metadata.url_domain.as_deref(),
+        Some("www.rust-lang.org")
+    );
 }
 
 #[test]
@@ -243,7 +240,10 @@ fn processor_richtext_strips_html_when_no_plain() {
     // Without text/plain, richtext classification fails (both html+plain required).
     // So this should return an error or classify differently.
     // classify_with_content requires html+plain for RichText, else None → error.
-    assert!(entry.is_err(), "html without plain should not be classifiable as RichText");
+    assert!(
+        entry.is_err(),
+        "html without plain should not be classifiable as RichText"
+    );
 }
 
 #[test]
@@ -262,12 +262,13 @@ fn processor_richtext_canonical_hash_from_html() {
 
 /// Build a minimal valid 1×1 RGBA PNG as a byte vector.
 fn make_minimal_png() -> Vec<u8> {
-    use image::{ImageBuffer, Rgba};
     use image::codecs::png::PngEncoder;
     use image::ImageEncoder;
+    use image::{ImageBuffer, Rgba};
     use std::io::Cursor;
 
-    let img: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::from_pixel(1, 1, Rgba([255, 0, 128, 255]));
+    let img: ImageBuffer<Rgba<u8>, Vec<u8>> =
+        ImageBuffer::from_pixel(1, 1, Rgba([255, 0, 128, 255]));
     let mut buf = Vec::new();
     let encoder = PngEncoder::new(Cursor::new(&mut buf));
     encoder
@@ -282,7 +283,10 @@ fn processor_image_png_generates_thumbnail() {
     let payload = make_payload("image/png", &png_bytes);
     let entry = ContentProcessor::process(vec![payload], None).expect("process image");
     assert_eq!(entry.content_class, ContentClass::Image);
-    assert!(entry.thumbnail.is_some(), "thumbnail should be generated for valid PNG");
+    assert!(
+        entry.thumbnail.is_some(),
+        "thumbnail should be generated for valid PNG"
+    );
     assert!(entry.metadata.image_dimensions.is_some());
 }
 
@@ -304,7 +308,10 @@ fn processor_image_invalid_data_stores_raw_without_thumbnail() {
     let payload = make_payload("image/png", &garbage);
     let entry = ContentProcessor::process(vec![payload], None).expect("process bad image");
     assert_eq!(entry.content_class, ContentClass::Image);
-    assert!(entry.thumbnail.is_none(), "invalid image should produce no thumbnail");
+    assert!(
+        entry.thumbnail.is_none(),
+        "invalid image should produce no thumbnail"
+    );
     assert!(entry.metadata.image_dimensions.is_none());
 }
 
@@ -338,7 +345,10 @@ fn processor_files_percent_decoded_name() {
     let payload = make_payload("text/uri-list", uri_list);
     let entry = ContentProcessor::process(vec![payload], None).expect("process encoded file");
     let preview = entry.preview_text.unwrap();
-    assert!(preview.contains("my document.txt"), "filename should be percent-decoded");
+    assert!(
+        preview.contains("my document.txt"),
+        "filename should be percent-decoded"
+    );
 }
 
 #[test]
@@ -373,7 +383,10 @@ fn privacy_rejects_keepassxc_by_default() {
         &mimes(&["text/plain"]),
         Some("secret password"),
     );
-    assert_eq!(result, nixclip_core::pipeline::privacy::FilterResult::Reject);
+    assert_eq!(
+        result,
+        nixclip_core::pipeline::privacy::FilterResult::Reject
+    );
 }
 
 #[test]
@@ -384,7 +397,10 @@ fn privacy_rejects_1password_by_default() {
         &mimes(&["text/plain"]),
         Some("password123"),
     );
-    assert_eq!(result, nixclip_core::pipeline::privacy::FilterResult::Reject);
+    assert_eq!(
+        result,
+        nixclip_core::pipeline::privacy::FilterResult::Reject
+    );
 }
 
 #[test]
@@ -395,7 +411,10 @@ fn privacy_rejects_custom_ignored_app() {
         &mimes(&["text/plain"]),
         Some("data"),
     );
-    assert_eq!(result, nixclip_core::pipeline::privacy::FilterResult::Reject);
+    assert_eq!(
+        result,
+        nixclip_core::pipeline::privacy::FilterResult::Reject
+    );
 }
 
 #[test]
@@ -407,7 +426,10 @@ fn privacy_case_insensitive_app_match() {
         &mimes(&["text/plain"]),
         Some("secret"),
     );
-    assert_eq!(result, nixclip_core::pipeline::privacy::FilterResult::Reject);
+    assert_eq!(
+        result,
+        nixclip_core::pipeline::privacy::FilterResult::Reject
+    );
 }
 
 #[test]
@@ -433,50 +455,46 @@ fn privacy_rejects_kde_password_hint() {
         &mimes(&["text/plain", "x-kde-passwordManagerHint"]),
         Some("text"),
     );
-    assert_eq!(result, nixclip_core::pipeline::privacy::FilterResult::Reject);
+    assert_eq!(
+        result,
+        nixclip_core::pipeline::privacy::FilterResult::Reject
+    );
 }
 
 #[test]
 fn privacy_rejects_nspasteboard_concealed() {
     let filter = make_filter(&[], &[], true);
-    let result = filter.check(
-        None,
-        &mimes(&["org.nspasteboard.ConcealedType"]),
-        None,
+    let result = filter.check(None, &mimes(&["org.nspasteboard.ConcealedType"]), None);
+    assert_eq!(
+        result,
+        nixclip_core::pipeline::privacy::FilterResult::Reject
     );
-    assert_eq!(result, nixclip_core::pipeline::privacy::FilterResult::Reject);
 }
 
 #[test]
 fn privacy_rejects_nspasteboard_transient() {
     let filter = make_filter(&[], &[], true);
-    let result = filter.check(
-        None,
-        &mimes(&["org.nspasteboard.TransientType"]),
-        None,
+    let result = filter.check(None, &mimes(&["org.nspasteboard.TransientType"]), None);
+    assert_eq!(
+        result,
+        nixclip_core::pipeline::privacy::FilterResult::Reject
     );
-    assert_eq!(result, nixclip_core::pipeline::privacy::FilterResult::Reject);
 }
 
 #[test]
 fn privacy_rejects_password_substring_in_mime() {
     let filter = make_filter(&[], &[], true);
-    let result = filter.check(
-        None,
-        &mimes(&["application/x-password-data"]),
-        None,
+    let result = filter.check(None, &mimes(&["application/x-password-data"]), None);
+    assert_eq!(
+        result,
+        nixclip_core::pipeline::privacy::FilterResult::Reject
     );
-    assert_eq!(result, nixclip_core::pipeline::privacy::FilterResult::Reject);
 }
 
 #[test]
 fn privacy_allows_sensitive_mimes_when_hints_disabled() {
     let filter = make_filter(&[], &[], false);
-    let result = filter.check(
-        None,
-        &mimes(&["x-kde-passwordManagerHint"]),
-        None,
-    );
+    let result = filter.check(None, &mimes(&["x-kde-passwordManagerHint"]), None);
     assert_eq!(result, nixclip_core::pipeline::privacy::FilterResult::Allow);
 }
 
@@ -490,7 +508,10 @@ fn privacy_ephemeral_on_openai_key_pattern() {
     let filter = PrivacyFilter::new(&IgnoreConfig::default()).expect("default filter");
     let key = format!("sk-{}", "A".repeat(48));
     let result = filter.check(None, &mimes(&["text/plain"]), Some(&key));
-    assert_eq!(result, nixclip_core::pipeline::privacy::FilterResult::Ephemeral);
+    assert_eq!(
+        result,
+        nixclip_core::pipeline::privacy::FilterResult::Ephemeral
+    );
 }
 
 #[test]
@@ -499,7 +520,10 @@ fn privacy_ephemeral_on_github_token_pattern() {
     let filter = PrivacyFilter::new(&IgnoreConfig::default()).expect("default filter");
     let token = format!("ghp_{}", "B".repeat(36));
     let result = filter.check(None, &mimes(&["text/plain"]), Some(&token));
-    assert_eq!(result, nixclip_core::pipeline::privacy::FilterResult::Ephemeral);
+    assert_eq!(
+        result,
+        nixclip_core::pipeline::privacy::FilterResult::Ephemeral
+    );
 }
 
 #[test]
@@ -535,7 +559,10 @@ fn privacy_app_rejection_before_sensitive_mime() {
         &mimes(&["x-kde-passwordManagerHint"]),
         Some("secret"),
     );
-    assert_eq!(result, nixclip_core::pipeline::privacy::FilterResult::Reject);
+    assert_eq!(
+        result,
+        nixclip_core::pipeline::privacy::FilterResult::Reject
+    );
 }
 
 #[test]
@@ -547,7 +574,10 @@ fn privacy_app_rejection_before_pattern_match() {
         Some("secret"),
     );
     // Should be Reject (app match) not Ephemeral (pattern match).
-    assert_eq!(result, nixclip_core::pipeline::privacy::FilterResult::Reject);
+    assert_eq!(
+        result,
+        nixclip_core::pipeline::privacy::FilterResult::Reject
+    );
 }
 
 #[test]
@@ -558,5 +588,8 @@ fn privacy_no_source_app_still_filters_mimes() {
         &mimes(&["org.nspasteboard.ConcealedType"]),
         Some("text"),
     );
-    assert_eq!(result, nixclip_core::pipeline::privacy::FilterResult::Reject);
+    assert_eq!(
+        result,
+        nixclip_core::pipeline::privacy::FilterResult::Reject
+    );
 }

@@ -3,7 +3,7 @@
 use nixclip_core::ipc::{ClientMessage, ServerMessage};
 use nixclip_core::Result;
 
-use crate::commands::list::{format_age, print_table_header, print_entry_row};
+use crate::commands::list::{format_age, print_entry_row, print_table_header};
 use crate::ipc_client::IpcClient;
 
 pub async fn run(
@@ -43,11 +43,7 @@ pub async fn run(
                     print_entry_row(entry);
                 }
                 println!();
-                println!(
-                    "Found {} of {} matching entries.",
-                    entries.len(),
-                    total
-                );
+                println!("Found {} of {} matching entries.", entries.len(), total);
             }
         }
         ServerMessage::Error { message, .. } => {

@@ -19,7 +19,8 @@ wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 zbus = "4"
 futures-util = "0.3"
-ashpd = "0.9"
+ashpd = { version = "0.9", default-features = false, features = ["tokio"] }
 nix = { version = "0.29", features = ["socket", "user"] }
 toml = "0.8"
 async-trait = "0.1"
+wl-clipboard-rs = "0.9.3"

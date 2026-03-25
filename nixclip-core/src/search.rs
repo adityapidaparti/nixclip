@@ -4,8 +4,8 @@
 use rusqlite::{Connection, OpenFlags};
 use tracing::{debug, warn};
 
-use crate::{ContentClass, EntryMetadata, EntrySummary, QueryResult};
 use crate::error::Result;
+use crate::{ContentClass, EntryMetadata, EntrySummary, QueryResult};
 
 // ---------------------------------------------------------------------------
 // SearchEngine
@@ -362,8 +362,8 @@ fn score_candidates(
     query: &str,
     now_ms: i64,
 ) -> Vec<(EntrySummary, f64)> {
-    use nucleo_matcher::{Config, Matcher, Utf32Str};
     use nucleo_matcher::pattern::{AtomKind, CaseMatching, Pattern};
+    use nucleo_matcher::{Config, Matcher, Utf32Str};
 
     let mut matcher = Matcher::new(Config::DEFAULT);
     // Pattern::new splits on whitespace and matches each word as Fuzzy atoms,
@@ -379,10 +379,7 @@ fn score_candidates(
     let mut max_score: u32 = 1; // avoid division by zero
 
     for entry in &candidates {
-        let haystack_str = entry
-            .preview_text
-            .as_deref()
-            .unwrap_or("");
+        let haystack_str = entry.preview_text.as_deref().unwrap_or("");
         let haystack = Utf32Str::new(haystack_str, &mut buf);
         let mut indices = Vec::new();
         let score = pattern.indices(haystack, &mut matcher, &mut indices);
@@ -399,12 +396,11 @@ fn score_candidates(
     // Second pass: build composite scores, dropping non-matching entries.
     candidates
         .into_iter()
-        .zip(raw_scores.into_iter())
+        .zip(raw_scores)
         .filter_map(|(mut entry, raw_data)| {
             let (raw, char_indices) = raw_data?; // drop entries with no nucleo match
             let normalized = raw as f64 / max_score as f64;
-            let composite =
-                composite_score(normalized, entry.last_seen_at, entry.pinned, now_ms);
+            let composite = composite_score(normalized, entry.last_seen_at, entry.pinned, now_ms);
 
             // Convert character indices to (start_byte, length_bytes) ranges,
             // collapsing consecutive positions into contiguous ranges.
@@ -428,8 +424,7 @@ fn score_candidates(
                 let mut end_char = start_char;
 
                 // Extend range while characters are consecutive.
-                while i + 1 < sorted_indices.len()
-                    && sorted_indices[i + 1] as usize == end_char + 1
+                while i + 1 < sorted_indices.len() && sorted_indices[i + 1] as usize == end_char + 1
                 {
                     end_char = sorted_indices[i + 1] as usize;
                     i += 1;
@@ -515,7 +510,11 @@ mod tests {
     fn sanitize_strips_operators() {
         // Boolean keywords should be dropped.
         let expr = sanitize_fts5_query("AND OR NOT").unwrap_or_default();
-        assert!(expr.is_empty(), "all tokens stripped, expect empty: {:?}", expr);
+        assert!(
+            expr.is_empty(),
+            "all tokens stripped, expect empty: {:?}",
+            expr
+        );
     }
 
     #[test]

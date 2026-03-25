@@ -10,7 +10,9 @@ pub async fn run(client: &mut IpcClient, json: bool) -> Result<()> {
     let msg = ClientMessage::query(None, None, 0, 0);
 
     match client.request(&msg).await? {
-        ServerMessage::QueryResult { entries: _, total, .. } => {
+        ServerMessage::QueryResult {
+            entries: _, total, ..
+        } => {
             // Also query pinned entries count.
             let pinned_msg = ClientMessage::query(None, None, 0, 10000);
             let (pinned_count, text_count, image_count, url_count, files_count, richtext_count) =
@@ -19,9 +21,7 @@ pub async fn run(client: &mut IpcClient, json: bool) -> Result<()> {
                         let pinned = entries.iter().filter(|e| e.pinned).count();
                         let text = entries
                             .iter()
-                            .filter(|e| {
-                                matches!(e.content_class, nixclip_core::ContentClass::Text)
-                            })
+                            .filter(|e| matches!(e.content_class, nixclip_core::ContentClass::Text))
                             .count();
                         let image = entries
                             .iter()
@@ -31,9 +31,7 @@ pub async fn run(client: &mut IpcClient, json: bool) -> Result<()> {
                             .count();
                         let url = entries
                             .iter()
-                            .filter(|e| {
-                                matches!(e.content_class, nixclip_core::ContentClass::Url)
-                            })
+                            .filter(|e| matches!(e.content_class, nixclip_core::ContentClass::Url))
                             .count();
                         let files = entries
                             .iter()

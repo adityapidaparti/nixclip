@@ -148,10 +148,7 @@ mod tests {
 
     #[test]
     fn image_jpeg_wins() {
-        assert_eq!(
-            classify(&mimes(&["image/jpeg"])),
-            Some(ContentClass::Image)
-        );
+        assert_eq!(classify(&mimes(&["image/jpeg"])), Some(ContentClass::Image));
     }
 
     #[test]
@@ -214,10 +211,7 @@ mod tests {
     #[test]
     fn no_url_promotion_whitespace() {
         assert_eq!(
-            classify_with_content(
-                &mimes(&["text/plain"]),
-                Some("hello world")
-            ),
+            classify_with_content(&mimes(&["text/plain"]), Some("hello world")),
             Some(ContentClass::Text)
         );
     }
