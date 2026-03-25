@@ -11,9 +11,9 @@ use tracing::{debug, error, info, warn};
 use nixclip_core::config::Config;
 use nixclip_core::error::{NixClipError, Result};
 use nixclip_core::ipc::{
-    recv_message, send_message, ClientMessage, ServerMessage, PROTOCOL_VERSION,
+    recv_message, send_message, ClientMessage, ServerMessage,
 };
-use nixclip_core::{ContentClass, EntrySummary, Query, Representation, RestoreMode};
+use nixclip_core::{ContentClass, Query, RestoreMode};
 
 use crate::watcher;
 use crate::AppState;
@@ -272,7 +272,7 @@ async fn handle_query(
                 return ServerMessage::error(format!("store lock poisoned: {e}"));
             }
         };
-        store.query(&query)
+        store.query(query)
     };
 
     match result {
@@ -430,8 +430,12 @@ async fn handle_set_config(
 
     // Reload privacy filter.
     {
-        let new_filter =
-            nixclip_core::pipeline::PrivacyFilter::new(&new_config.ignore);
+        let new_filter = match nixclip_core::pipeline::PrivacyFilter::new(&new_config.ignore) {
+            Ok(f) => f,
+            Err(e) => {
+                return ServerMessage::error(format!("invalid privacy filter config: {e}"));
+            }
+        };
         let mut filter = state.privacy_filter.write().await;
         *filter = new_filter;
     }

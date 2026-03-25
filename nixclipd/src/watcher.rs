@@ -11,6 +11,7 @@ use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
 use nixclip_core::error::{NixClipError, Result};
+use nixclip_core::pipeline::privacy::FilterResult;
 use nixclip_core::pipeline::ContentProcessor;
 use nixclip_core::{MimePayload, NewEntry, Representation};
 
@@ -199,6 +200,12 @@ pub async fn run(state: Arc<AppState>) -> Result<()> {
 
 /// Process a single clipboard event.
 async fn handle_event(state: &AppState, event: ClipboardEvent) -> Result<()> {
+    let ClipboardEvent {
+        offered_mimes,
+        payloads,
+        source_app,
+    } = event;
+
     // Skip if screen is locked.
     if state.is_locked.load(Ordering::Relaxed) {
         debug!("screen is locked, skipping clipboard event");
@@ -208,9 +215,12 @@ async fn handle_event(state: &AppState, event: ClipboardEvent) -> Result<()> {
     // Run privacy filter.
     {
         let filter = state.privacy_filter.read().await;
-        if filter.should_ignore(&event.offered_mimes, event.source_app.as_deref()) {
+        if matches!(
+            filter.check(source_app.as_deref(), &offered_mimes, None),
+            FilterResult::Reject
+        ) {
             debug!(
-                source_app = ?event.source_app,
+                source_app = ?source_app,
                 "privacy filter rejected clipboard event"
             );
             return Ok(());
@@ -218,7 +228,27 @@ async fn handle_event(state: &AppState, event: ClipboardEvent) -> Result<()> {
     }
 
     // Process content (classification, hashing, thumbnails, etc.).
-    let processed = ContentProcessor::process(event.payloads, event.source_app.clone())?;
+    let processed = ContentProcessor::process(payloads, source_app.clone())?;
+
+    let filter_result = {
+        let filter = state.privacy_filter.read().await;
+        filter.check(
+            source_app.as_deref(),
+            &offered_mimes,
+            processed.preview_text.as_deref(),
+        )
+    };
+    if matches!(filter_result, FilterResult::Reject) {
+        debug!(
+            source_app = ?source_app,
+            "privacy filter rejected clipboard content after preview generation"
+        );
+        return Ok(());
+    }
+    let is_ephemeral = matches!(filter_result, FilterResult::Ephemeral);
+    if is_ephemeral {
+        debug!("privacy filter flagged content as ephemeral");
+    }
 
     // Build the NewEntry.
     let new_entry = NewEntry {
@@ -226,8 +256,8 @@ async fn handle_event(state: &AppState, event: ClipboardEvent) -> Result<()> {
         preview_text: processed.preview_text.clone(),
         canonical_hash: processed.canonical_hash,
         representations: processed.representations.clone(),
-        source_app: event.source_app,
-        ephemeral: false,
+        source_app: source_app.clone(),
+        ephemeral: is_ephemeral,
     };
 
     // Insert into the store (via spawn_blocking since rusqlite is !Send-safe
@@ -236,13 +266,29 @@ async fn handle_event(state: &AppState, event: ClipboardEvent) -> Result<()> {
         let store = state.store.lock().map_err(|e| {
             NixClipError::Pipeline(format!("store lock poisoned: {e}"))
         })?;
-        store.insert(&new_entry)?
+        store.insert(new_entry)?
     };
 
-    debug!(id = summary.id, class = %summary.content_class, "new entry stored");
+    if let Some(entry_id) = summary {
+        debug!(id = entry_id, class = %processed.content_class, "new entry stored");
 
-    // Broadcast to subscribers (ignore send errors -- no subscribers is fine).
-    let _ = state.new_entry_tx.send(summary);
+        // Build a summary for broadcast. We construct a minimal one from what
+        // we already know to avoid another DB query.
+        let broadcast = nixclip_core::EntrySummary {
+            id: entry_id,
+            created_at: chrono::Utc::now().timestamp_millis(),
+            last_seen_at: chrono::Utc::now().timestamp_millis(),
+            pinned: false,
+            ephemeral: is_ephemeral,
+            content_class: processed.content_class,
+            preview_text: processed.preview_text,
+            source_app,
+            thumbnail: processed.thumbnail,
+        };
+        let _ = state.new_entry_tx.send(broadcast);
+    } else {
+        debug!("entry deduplicated (same as most recent)");
+    }
 
     Ok(())
 }
@@ -274,4 +320,47 @@ pub async fn restore_to_clipboard(representations: Vec<Representation>) -> Resul
         .collect();
 
     backend.set_selection(reps).await
+}
+
+#[cfg(test)]
+mod tests {
+    use nixclip_core::config::IgnoreConfig;
+    use nixclip_core::pipeline::PrivacyFilter;
+
+    use super::*;
+
+    fn default_filter() -> PrivacyFilter {
+        PrivacyFilter::new(&IgnoreConfig::default()).expect("default filter")
+    }
+
+    #[test]
+    fn pattern_matches_require_preview_text_in_second_pass() {
+        let filter = default_filter();
+        let offered_mimes = vec!["text/plain".to_string()];
+        let preview = format!("sk-{}", "X".repeat(48));
+
+        assert!(!matches!(
+            filter.check(None, &offered_mimes, None),
+            FilterResult::Ephemeral
+        ));
+        assert!(matches!(
+            filter.check(None, &offered_mimes, Some(&preview)),
+            FilterResult::Ephemeral
+        ));
+    }
+
+    #[test]
+    fn ignored_apps_are_rejected_before_processing() {
+        let filter = default_filter();
+        let offered_mimes = vec!["text/plain".to_string()];
+
+        assert!(matches!(
+            filter.check(
+                Some("org.keepassxc.KeePassXC"),
+                &offered_mimes,
+                Some("normal text"),
+            ),
+            FilterResult::Reject
+        ));
+    }
 }

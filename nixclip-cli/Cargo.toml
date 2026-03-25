@@ -4,6 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[[bin]]
+name = "nixclip"
+path = "src/main.rs"
+
 [dependencies]
 nixclip-core = { path = "../nixclip-core" }
 tokio = { workspace = true }

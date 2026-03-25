@@ -1,6 +1,7 @@
 //! Global shortcut registration via XDG GlobalShortcuts portal.
 //!
-//! On GNOME 44+, the portal allows apps to register system-wide shortcuts.
+//! GNOME 48+ is the expected full-support floor for app-managed global
+//! shortcuts via the GlobalShortcuts portal.
 //! If the portal is unavailable, this module logs a warning and returns
 //! without error — it is non-fatal.
 
@@ -15,9 +16,9 @@ use crate::AppState;
 /// Run the global shortcut listener.
 ///
 /// Attempts to register a system-wide shortcut via the XDG GlobalShortcuts
-/// portal.  If the portal is not available (common on older GNOME versions or
+/// portal. If the portal is not available (common on GNOME < 48 or
 /// non-GNOME compositors), this logs a warning and returns `Ok(())` — the
-/// daemon continues without hotkey support.
+/// daemon continues without hotkey support and users must bind manually.
 pub async fn run(state: Arc<AppState>) -> Result<()> {
     let config = state.config.read().await;
     let trigger = config.keybind.toggle.clone();

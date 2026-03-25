@@ -3,7 +3,7 @@
 use nixclip_core::ipc::{ClientMessage, ServerMessage};
 use nixclip_core::Result;
 
-use crate::commands::list::{format_age, format_preview, print_table_header, print_entry_row};
+use crate::commands::list::{format_age, print_table_header, print_entry_row};
 use crate::ipc_client::IpcClient;
 
 pub async fn run(

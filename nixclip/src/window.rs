@@ -126,7 +126,7 @@ impl PopupWindow {
         outer_box.append(&clamp);
         window.set_content(Some(&outer_box));
 
-        // --- Position at top-center ------------------------------------------
+        // --- Request top-biased placement ------------------------------------
         position_top_center(&window);
 
         // --- Build struct before wiring signals ------------------------------
@@ -391,7 +391,8 @@ fn load_badge_css() {
     }
 }
 
-/// Attempt to position the window at the top-center of the primary monitor.
+/// Request a top-biased presentation hint without assuming compositor-managed
+/// placement can be controlled by the client on Wayland.
 fn position_top_center(window: &adw::Window) {
     // GTK4 on Wayland does not allow arbitrary window positioning by the
     // client.  On X11 the window manager handles placement.  We set a top

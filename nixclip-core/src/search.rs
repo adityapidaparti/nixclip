@@ -38,6 +38,7 @@ impl SearchEngine {
         )?;
 
         let trimmed = text.trim();
+        let normalized_query = normalized_query_text(trimmed);
 
         // Retrieve candidates from the database (up to 500).
         let candidates = if trimmed.is_empty() {
@@ -49,12 +50,20 @@ impl SearchEngine {
                 Ok(_) => {
                     // FTS5 returned nothing — try LIKE fallback.
                     debug!("FTS5 returned no results, falling back to LIKE query");
-                    fetch_like_candidates(&conn, trimmed, content_class)?
+                    fetch_like_candidates(
+                        &conn,
+                        normalized_query.as_deref().unwrap_or(trimmed),
+                        content_class,
+                    )?
                 }
                 Err(e) => {
                     // FTS5 query syntax error or other FTS error — fall back.
                     warn!("FTS5 query failed ({}), falling back to LIKE query", e);
-                    fetch_like_candidates(&conn, trimmed, content_class)?
+                    fetch_like_candidates(
+                        &conn,
+                        normalized_query.as_deref().unwrap_or(trimmed),
+                        content_class,
+                    )?
                 }
             }
         };
@@ -71,7 +80,11 @@ impl SearchEngine {
                 })
                 .collect()
         } else {
-            score_candidates(candidates, trimmed, now_ms)
+            score_candidates(
+                candidates,
+                normalized_query.as_deref().unwrap_or(trimmed),
+                now_ms,
+            )
         };
 
         // Sort by composite score descending.
@@ -108,29 +121,41 @@ impl SearchEngine {
 /// We adopt a conservative strategy: keep only alphanumeric characters and
 /// safe punctuation (hyphens inside words, apostrophes). Everything else is
 /// dropped.  Returns `None` if the sanitized result is empty.
-fn sanitize_fts5_query(raw: &str) -> Option<String> {
-    // Split into whitespace-separated tokens, sanitise each token, then
-    // reassemble as prefix-matching atoms: `token*`.
-    let tokens: Vec<String> = raw
-        .split_whitespace()
+fn normalize_query_tokens(raw: &str) -> Vec<String> {
+    raw.split_whitespace()
         .filter_map(|token| {
-            // Strip any character that has FTS5 operator meaning.
             let cleaned: String = token
                 .chars()
                 .filter(|c| c.is_alphanumeric() || *c == '\'' || *c == '-')
                 .collect();
 
-            // Drop tokens that are FTS5 boolean keywords (case-insensitive).
             if cleaned.is_empty() {
                 return None;
             }
+
             let upper = cleaned.to_uppercase();
             if upper == "OR" || upper == "AND" || upper == "NOT" {
                 return None;
             }
+
             Some(cleaned)
         })
-        .collect();
+        .collect()
+}
+
+fn normalized_query_text(raw: &str) -> Option<String> {
+    let tokens = normalize_query_tokens(raw);
+    if tokens.is_empty() {
+        None
+    } else {
+        Some(tokens.join(" "))
+    }
+}
+
+fn sanitize_fts5_query(raw: &str) -> Option<String> {
+    // Split into whitespace-separated tokens, sanitise each token, then
+    // reassemble as prefix-matching atoms: `token*`.
+    let tokens = normalize_query_tokens(raw);
 
     if tokens.is_empty() {
         return None;

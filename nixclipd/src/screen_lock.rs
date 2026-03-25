@@ -4,6 +4,7 @@
 //! clipboard capture while the screen is locked.  If the D-Bus connection
 //! fails, this module returns without error — it is non-fatal.
 
+#[cfg(target_os = "linux")]
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 

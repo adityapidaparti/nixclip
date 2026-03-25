@@ -46,7 +46,7 @@
             # rusqlite uses the "bundled" feature (compiles SQLite from
             # source), so no system sqlite is required at link time.
             # pkg-config is still needed for the libraries above.
-          ] ++ lib.optionals stdenv.isDarwin [
+          ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
             darwin.apple_sdk.frameworks.SystemConfiguration
           ];
         };
@@ -56,14 +56,14 @@
         # incrementally.
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
 
-        # Build the full workspace.  crane installs all workspace binaries
-        # automatically: nixclipd, nixclip, nixclip-cli.
+        # Build the full workspace. crane installs all workspace binaries
+        # automatically: nixclipd, nixclip (CLI), and nixclip-ui (GTK popup).
         nixclip = craneLib.buildPackage (commonArgs // {
           inherit cargoArtifacts;
 
           postInstall = ''
             # Verify that all expected binaries were installed.
-            for bin in nixclipd nixclip nixclip-cli; do
+            for bin in nixclipd nixclip nixclip-ui; do
               if [ ! -f "$out/bin/$bin" ]; then
                 echo "Warning: expected binary '$bin' not found in \$out/bin"
               fi

@@ -20,3 +20,4 @@ wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 zbus = "4"
 ashpd = "0.9"
 nix = { version = "0.29", features = ["socket", "user"] }
+toml = "0.8"

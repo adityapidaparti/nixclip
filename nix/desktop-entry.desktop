@@ -2,7 +2,7 @@
 Type=Application
 Name=NixClip
 Comment=Clipboard History Manager for GNOME
-Exec=nixclip
+Exec=nixclip-ui
 Icon=edit-paste-symbolic
 Categories=Utility;GTK;
 Keywords=clipboard;paste;history;copy;

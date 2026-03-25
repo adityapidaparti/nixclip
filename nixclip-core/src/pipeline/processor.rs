@@ -45,53 +45,11 @@ impl ContentProcessor {
         debug!(%content_class, "classified clipboard content");
 
         let entry = match content_class {
-            ContentClass::Image => {
-                let payload = offers
-                    .iter()
-                    .find(|p| p.mime == "image/png" || p.mime == "image/jpeg")
-                    .ok_or_else(|| {
-                        NixClipError::Pipeline("image MIME listed but no payload found".to_string())
-                    })?;
-                Self::process_image(payload)?
-            }
-
-            ContentClass::Files => {
-                let payload = offers
-                    .iter()
-                    .find(|p| {
-                        p.mime == "text/uri-list" || p.mime == "x-special/gnome-copied-files"
-                    })
-                    .ok_or_else(|| {
-                        NixClipError::Pipeline("files MIME listed but no payload found".to_string())
-                    })?;
-                Self::process_files(payload)?
-            }
-
+            ContentClass::Image => Self::process_image(&offers)?,
+            ContentClass::Files => Self::process_files(&offers)?,
             ContentClass::RichText => Self::process_richtext(&offers)?,
-
-            ContentClass::Url => {
-                let payload = offers
-                    .iter()
-                    .find(|p| p.mime == "text/plain")
-                    .ok_or_else(|| {
-                        NixClipError::Pipeline(
-                            "url class but no text/plain payload found".to_string(),
-                        )
-                    })?;
-                Self::process_url(payload)?
-            }
-
-            ContentClass::Text => {
-                let payload = offers
-                    .iter()
-                    .find(|p| p.mime == "text/plain")
-                    .ok_or_else(|| {
-                        NixClipError::Pipeline(
-                            "text class but no text/plain payload found".to_string(),
-                        )
-                    })?;
-                Self::process_text(payload)?
-            }
+            ContentClass::Url => Self::process_url(&offers)?,
+            ContentClass::Text => Self::process_text(&offers)?,
         };
 
         // Attach source_app (stored by caller in NewEntry, not in ProcessedEntry
@@ -106,7 +64,13 @@ impl ContentProcessor {
 
     /// Decode `text/plain` bytes as UTF-8 (lossy), truncate to
     /// [`PREVIEW_CHAR_LIMIT`] *characters*, and hash the raw bytes.
-    fn process_text(payload: &MimePayload) -> Result<ProcessedEntry> {
+    fn process_text(offers: &[MimePayload]) -> Result<ProcessedEntry> {
+        let payload = offers
+            .iter()
+            .find(|p| p.mime == "text/plain")
+            .ok_or_else(|| {
+                NixClipError::Pipeline("text class but no text/plain payload found".to_string())
+            })?;
         let text = String::from_utf8_lossy(&payload.data);
         let preview_text = truncate_chars(&text, PREVIEW_CHAR_LIMIT);
         let canonical_hash = *blake3::hash(&payload.data).as_bytes();
@@ -115,7 +79,7 @@ impl ContentProcessor {
             content_class: ContentClass::Text,
             preview_text: Some(preview_text),
             canonical_hash,
-            representations: vec![payload.clone()],
+            representations: offers.to_vec(),
             thumbnail: None,
             metadata: EntryMetadata::default(),
         })
@@ -123,7 +87,13 @@ impl ContentProcessor {
 
     /// Same as [`process_text`] but also extracts the domain from the URL
     /// and stores it in [`EntryMetadata::url_domain`].
-    fn process_url(payload: &MimePayload) -> Result<ProcessedEntry> {
+    fn process_url(offers: &[MimePayload]) -> Result<ProcessedEntry> {
+        let payload = offers
+            .iter()
+            .find(|p| p.mime == "text/plain")
+            .ok_or_else(|| {
+                NixClipError::Pipeline("url class but no text/plain payload found".to_string())
+            })?;
         let text = String::from_utf8_lossy(&payload.data);
         let trimmed = text.trim();
         let preview_text = truncate_chars(trimmed, PREVIEW_CHAR_LIMIT);
@@ -136,7 +106,7 @@ impl ContentProcessor {
             content_class: ContentClass::Url,
             preview_text: Some(preview_text),
             canonical_hash,
-            representations: vec![payload.clone()],
+            representations: offers.to_vec(),
             thumbnail: None,
             metadata: EntryMetadata {
                 url_domain,
@@ -190,8 +160,16 @@ impl ContentProcessor {
     ///
     /// If decoding fails, the error is logged and processing continues without
     /// a thumbnail. The raw bytes are always stored.
-    fn process_image(payload: &MimePayload) -> Result<ProcessedEntry> {
+    fn process_image(offers: &[MimePayload]) -> Result<ProcessedEntry> {
         use image::ImageFormat;
+
+        let payload = offers
+            .iter()
+            .find(|p| p.mime == "image/png")
+            .or_else(|| offers.iter().find(|p| p.mime == "image/jpeg"))
+            .ok_or_else(|| {
+                NixClipError::Pipeline("image MIME listed but no payload found".to_string())
+            })?;
 
         // Determine image format from MIME type.
         let format = match payload.mime.as_str() {
@@ -220,7 +198,7 @@ impl ContentProcessor {
             content_class: ContentClass::Image,
             preview_text: None,
             canonical_hash,
-            representations: vec![payload.clone()],
+            representations: offers.to_vec(),
             thumbnail,
             metadata: EntryMetadata {
                 image_dimensions,
@@ -265,7 +243,14 @@ impl ContentProcessor {
 
     /// Parse a `text/uri-list` (RFC 2483): one URI per line, `#` lines are
     /// comments. Extract `file://` URIs and use their filename as preview.
-    fn process_files(payload: &MimePayload) -> Result<ProcessedEntry> {
+    fn process_files(offers: &[MimePayload]) -> Result<ProcessedEntry> {
+        let payload = offers
+            .iter()
+            .find(|p| p.mime == "text/uri-list")
+            .or_else(|| offers.iter().find(|p| p.mime == "x-special/gnome-copied-files"))
+            .ok_or_else(|| {
+                NixClipError::Pipeline("files MIME listed but no payload found".to_string())
+            })?;
         let text = String::from_utf8_lossy(&payload.data);
 
         let uris: Vec<&str> = text
@@ -288,7 +273,7 @@ impl ContentProcessor {
             content_class: ContentClass::Files,
             preview_text: Some(preview_text),
             canonical_hash,
-            representations: vec![payload.clone()],
+            representations: offers.to_vec(),
             thumbnail: None,
             metadata: EntryMetadata {
                 file_count: Some(file_count),
