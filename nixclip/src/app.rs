@@ -158,7 +158,9 @@ fn setup_actions(
             let qq = q.clone();
             dialog.connect_response(None, move |_dlg, response| {
                 if response == "clear" {
+                    let pp = pp.clone();
                     let ii_cb = ii.clone();
+                    let qq = qq.clone();
                     ii.clear_unpinned(move |result| {
                         if let Err(error) = result {
                             tracing::warn!(error = %error, "clear all failed");

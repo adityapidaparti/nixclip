@@ -210,7 +210,6 @@ impl PopupWindow {
     fn setup_key_controller(&self) {
         let controller = gtk::EventControllerKey::new();
         let window = self.window.clone();
-        let list_box = self.list_box.clone();
         let search_entry = self.search_bar.entry.clone();
 
         controller.connect_key_pressed(move |_ctrl, keyval, _keycode, state| {
