@@ -225,51 +225,95 @@ impl PopupWindow {
 
                 gdk::Key::Return | gdk::Key::KP_Enter => {
                     if shift {
-                        window.activate_action("win.restore-plain", None);
+                        gtk::prelude::WidgetExt::activate_action(
+                            &window,
+                            "win.restore-plain",
+                            None,
+                        );
                     } else {
-                        window.activate_action("win.restore-original", None);
+                        gtk::prelude::WidgetExt::activate_action(
+                            &window,
+                            "win.restore-original",
+                            None,
+                        );
                     }
                     glib::Propagation::Stop
                 }
 
                 gdk::Key::BackSpace if ctrl => {
-                    window.activate_action("win.delete-entry", None);
+                    gtk::prelude::WidgetExt::activate_action(
+                        &window,
+                        "win.delete-entry",
+                        None,
+                    );
                     glib::Propagation::Stop
                 }
 
                 gdk::Key::p | gdk::Key::P if ctrl => {
-                    window.activate_action("win.toggle-pin", None);
+                    gtk::prelude::WidgetExt::activate_action(
+                        &window,
+                        "win.toggle-pin",
+                        None,
+                    );
                     glib::Propagation::Stop
                 }
 
                 gdk::Key::Delete if ctrl && shift => {
-                    window.activate_action("win.clear-all", None);
+                    gtk::prelude::WidgetExt::activate_action(
+                        &window,
+                        "win.clear-all",
+                        None,
+                    );
                     glib::Propagation::Stop
                 }
 
                 gdk::Key::comma if ctrl => {
-                    window.activate_action("win.open-settings", None);
+                    gtk::prelude::WidgetExt::activate_action(
+                        &window,
+                        "win.open-settings",
+                        None,
+                    );
                     glib::Propagation::Stop
                 }
 
                 gdk::Key::_1 if ctrl => {
-                    window.activate_action("win.filter", Some(&0i32.to_variant()));
+                    gtk::prelude::WidgetExt::activate_action(
+                        &window,
+                        "win.filter",
+                        Some(&0i32.to_variant()),
+                    );
                     glib::Propagation::Stop
                 }
                 gdk::Key::_2 if ctrl => {
-                    window.activate_action("win.filter", Some(&1i32.to_variant()));
+                    gtk::prelude::WidgetExt::activate_action(
+                        &window,
+                        "win.filter",
+                        Some(&1i32.to_variant()),
+                    );
                     glib::Propagation::Stop
                 }
                 gdk::Key::_3 if ctrl => {
-                    window.activate_action("win.filter", Some(&2i32.to_variant()));
+                    gtk::prelude::WidgetExt::activate_action(
+                        &window,
+                        "win.filter",
+                        Some(&2i32.to_variant()),
+                    );
                     glib::Propagation::Stop
                 }
                 gdk::Key::_4 if ctrl => {
-                    window.activate_action("win.filter", Some(&3i32.to_variant()));
+                    gtk::prelude::WidgetExt::activate_action(
+                        &window,
+                        "win.filter",
+                        Some(&3i32.to_variant()),
+                    );
                     glib::Propagation::Stop
                 }
                 gdk::Key::_5 if ctrl => {
-                    window.activate_action("win.filter", Some(&4i32.to_variant()));
+                    gtk::prelude::WidgetExt::activate_action(
+                        &window,
+                        "win.filter",
+                        Some(&4i32.to_variant()),
+                    );
                     glib::Propagation::Stop
                 }
 

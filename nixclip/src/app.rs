@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use adw::prelude::*;
-use gtk4 as gtk;
 use gtk4::gio;
 use gtk4::glib;
 use libadwaita as adw;
@@ -154,11 +153,11 @@ fn setup_actions(
             dialog.set_default_response(Some("cancel"));
             dialog.set_close_response("cancel");
 
+            let pp = p.clone();
+            let ii = i.clone();
+            let qq = q.clone();
             dialog.connect_response(None, move |_dlg, response| {
                 if response == "clear" {
-                    let pp = p.clone();
-                    let ii = i.clone();
-                    let qq = q.clone();
                     let ii_cb = ii.clone();
                     ii.clear_unpinned(move |result| {
                         if let Err(error) = result {

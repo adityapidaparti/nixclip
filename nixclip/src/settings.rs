@@ -2,7 +2,6 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use adw::prelude::*;
-use gtk::prelude::*;
 use gtk4 as gtk;
 use libadwaita as adw;
 
