@@ -47,7 +47,6 @@ nixclip paste 42 --plain        # restore as plain text (strip formatting)
 
 # Open the popup UI:
 nixclip-ui
-# Or use the hotkey: Super+Shift+V
 ```
 
 ## CLI Reference
@@ -133,7 +132,6 @@ Diagnostic checks: daemon connectivity, Wayland protocol support, GNOME version,
 
 | Key | Action |
 |-----|--------|
-| `Super+Shift+V` | Open/close popup |
 | `Return` | Restore selected entry |
 | `Shift+Return` | Restore as plain text |
 | `Ctrl+BackSpace` | Delete selected entry |
@@ -164,7 +162,6 @@ show_source_app = true
 show_content_badges = true
 
 [keybind]
-toggle = "Super+Shift+V"
 restore_original = "Return"
 restore_plain = "Shift+Return"
 delete = "Ctrl+BackSpace"
