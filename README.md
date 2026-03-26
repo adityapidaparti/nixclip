@@ -9,6 +9,8 @@ Three components:
 
 ## Install
 
+Requires a [flake-based NixOS configuration](https://wiki.nixos.org/wiki/Flakes).
+
 ### 1. Add the flake input
 
 In your **`flake.nix`**, add `nixclip` to your inputs:
@@ -23,14 +25,17 @@ In your **`flake.nix`**, add `nixclip` to your inputs:
 }
 ```
 
-Then pass `inputs` through to your NixOS configuration via `specialArgs` (if you haven't already):
+Then make sure `inputs` is captured in your outputs function and passed through to your NixOS configuration via `specialArgs`:
 
 ```nix
-# Inside your flake outputs, where you define nixosConfigurations:
-nixosConfigurations.your-hostname = nixpkgs.lib.nixosSystem {
-  specialArgs = { inherit inputs; };
-  modules = [ ./configuration.nix ];
-};
+{
+  outputs = inputs@{ self, nixpkgs, nixclip, ... }: {
+    nixosConfigurations.your-hostname = nixpkgs.lib.nixosSystem {
+      specialArgs = { inherit inputs; };
+      modules = [ ./configuration.nix ];
+    };
+  };
+}
 ```
 
 ### 2. Enable NixClip in your configuration.nix
@@ -50,7 +55,7 @@ nixosConfigurations.your-hostname = nixpkgs.lib.nixosSystem {
 ### 3. Rebuild
 
 ```bash
-sudo nixos-rebuild switch
+sudo nixos-rebuild switch --flake /etc/nixos#your-hostname
 ```
 
 This installs all three binaries (`nixclipd`, `nixclip`, `nixclip-ui`) and starts a systemd user service that runs automatically with your graphical session.
