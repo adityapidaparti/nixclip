@@ -143,12 +143,20 @@ nixclip doctor
 
 Diagnostic checks: daemon connectivity, Wayland protocol support, GNOME version, config validity, database access. Run this first if something isn't working.
 
-## UI Keybindings
+## Keybindings
+
+### Global Shortcuts
 
 | Key | Action |
 |-----|--------|
-| `Return` | Restore selected entry |
-| `Shift+Return` | Restore as plain text |
+| `Super+V` | Open popup (paste with formatting) |
+| `Super+Shift+V` | Open popup (paste as plain text) |
+
+### In the Popup
+
+| Key | Action |
+|-----|--------|
+| `Return` | Paste selected entry (formatting depends on how popup was opened) |
 | `Ctrl+BackSpace` | Delete selected entry |
 | `Ctrl+P` | Pin/unpin |
 | `Ctrl+Shift+Delete` | Clear all unpinned |
@@ -177,6 +185,8 @@ show_source_app = true
 show_content_badges = true
 
 [keybind]
+open_formatted = "Super+V"
+open_plain = "Super+Shift+V"
 restore_original = "Return"
 restore_plain = "Shift+Return"
 delete = "Ctrl+BackSpace"
@@ -207,6 +217,10 @@ services.nixclip.settings = {
   general = {
     max_entries = 2000;
     retention = "6months";
+  };
+  keybind = {
+    open_formatted = "Super+V";
+    open_plain = "Super+Shift+V";
   };
   ignore.apps = [ "org.keepassxc.KeePassXC" ];
 };

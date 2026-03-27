@@ -22,9 +22,13 @@ use tracing::{info, warn};
 use crate::AppState;
 
 #[cfg(target_os = "linux")]
-const SHORTCUT_ID: &str = "toggle";
+const SHORTCUT_FORMATTED_ID: &str = "open-formatted";
 #[cfg(target_os = "linux")]
-const SHORTCUT_DESCRIPTION: &str = "Toggle NixClip clipboard history";
+const SHORTCUT_FORMATTED_DESCRIPTION: &str = "Open NixClip (paste with formatting)";
+#[cfg(target_os = "linux")]
+const SHORTCUT_PLAIN_ID: &str = "open-plain";
+#[cfg(target_os = "linux")]
+const SHORTCUT_PLAIN_DESCRIPTION: &str = "Open NixClip (paste as plain text)";
 const FAST_RETRY_DELAY: Duration = Duration::from_secs(15);
 const SLOW_RETRY_DELAY: Duration = Duration::from_secs(300);
 const FAST_RETRY_LIMIT: u32 = 10;
@@ -38,10 +42,11 @@ pub async fn run(state: Arc<AppState>) -> Result<()> {
     let mut consecutive_failures = 0_u32;
 
     loop {
-        let trigger = state.config.read().await.keybind.toggle.clone();
-        info!(trigger = %trigger, "starting GlobalShortcuts portal listener");
+        let trigger_formatted = state.config.read().await.keybind.open_formatted.clone();
+        let trigger_plain = state.config.read().await.keybind.open_plain.clone();
+        info!(trigger_formatted = %trigger_formatted, trigger_plain = %trigger_plain, "starting GlobalShortcuts portal listener");
 
-        let retry_delay = match register_and_listen(&trigger).await {
+        let retry_delay = match register_and_listen(&trigger_formatted, &trigger_plain).await {
             Ok(()) => {
                 if consecutive_failures > 0 {
                     info!(consecutive_failures, "global shortcut listener recovered");
@@ -80,7 +85,8 @@ pub async fn run(state: Arc<AppState>) -> Result<()> {
 }
 
 async fn register_and_listen(
-    #[allow(unused_variables)] trigger: &str,
+    #[allow(unused_variables)] trigger_formatted: &str,
+    #[allow(unused_variables)] trigger_plain: &str,
 ) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     #[cfg(not(target_os = "linux"))]
     {
@@ -93,15 +99,28 @@ async fn register_and_listen(
         let session = portal.create_session().await?;
 
         let listed = portal.list_shortcuts(&session).await?.response()?;
-        if listed
+        let has_formatted = listed
             .shortcuts()
             .iter()
-            .all(|shortcut| shortcut.id() != SHORTCUT_ID)
-        {
-            let shortcut = NewShortcut::new(SHORTCUT_ID, SHORTCUT_DESCRIPTION)
-                .preferred_trigger(Some(trigger));
+            .any(|shortcut| shortcut.id() == SHORTCUT_FORMATTED_ID);
+        let has_plain = listed
+            .shortcuts()
+            .iter()
+            .any(|shortcut| shortcut.id() == SHORTCUT_PLAIN_ID);
+
+        if !has_formatted || !has_plain {
+            let shortcut_formatted =
+                NewShortcut::new(SHORTCUT_FORMATTED_ID, SHORTCUT_FORMATTED_DESCRIPTION)
+                    .preferred_trigger(Some(trigger_formatted));
+            let shortcut_plain =
+                NewShortcut::new(SHORTCUT_PLAIN_ID, SHORTCUT_PLAIN_DESCRIPTION)
+                    .preferred_trigger(Some(trigger_plain));
             let bound = portal
-                .bind_shortcuts(&session, &[shortcut], &WindowIdentifier::default())
+                .bind_shortcuts(
+                    &session,
+                    &[shortcut_formatted, shortcut_plain],
+                    &WindowIdentifier::default(),
+                )
                 .await?
                 .response()?;
             if bound.shortcuts().is_empty() {
@@ -116,7 +135,11 @@ async fn register_and_listen(
                 }
             }
         } else {
-            info!(trigger = %trigger, "reusing existing global shortcut binding");
+            info!(
+                trigger_formatted = %trigger_formatted,
+                trigger_plain = %trigger_plain,
+                "reusing existing global shortcut bindings"
+            );
         }
 
         for shortcut in listed.shortcuts() {
@@ -139,12 +162,17 @@ async fn register_and_listen(
                     return Ok(());
                 }
                 Some(event) = activated.next() => {
-                    if event.shortcut_id() != SHORTCUT_ID {
+                    let shortcut_id = event.shortcut_id();
+                    let plain = if shortcut_id == SHORTCUT_FORMATTED_ID {
+                        false
+                    } else if shortcut_id == SHORTCUT_PLAIN_ID {
+                        true
+                    } else {
                         continue;
-                    }
+                    };
 
                     let activation_token = activation_token(event.options());
-                    if let Err(error) = spawn_ui(activation_token.as_deref()) {
+                    if let Err(error) = spawn_ui(activation_token.as_deref(), plain) {
                         warn!(error = %error, "failed to spawn nixclip-ui");
                     }
                 }
@@ -219,7 +247,7 @@ fn format_error_chain(mut error: &(dyn std::error::Error + 'static)) -> String {
 }
 
 #[cfg(target_os = "linux")]
-fn spawn_ui(activation_token: Option<&str>) -> std::io::Result<()> {
+fn spawn_ui(activation_token: Option<&str>, plain: bool) -> std::io::Result<()> {
     let executable = resolve_ui_binary();
     let mut command = std::process::Command::new(&executable);
     command
@@ -235,9 +263,14 @@ fn spawn_ui(activation_token: Option<&str>) -> std::io::Result<()> {
             .env("XDG_ACTIVATION_TOKEN", token);
     }
 
+    if plain {
+        command.arg("--plain");
+    }
+
     info!(
         executable = %executable.display(),
         activation_token = activation_token.is_some(),
+        plain,
         "spawning nixclip-ui"
     );
 

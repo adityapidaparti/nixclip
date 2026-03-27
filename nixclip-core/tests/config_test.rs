@@ -108,9 +108,15 @@ fn default_ui_position_is_top_center() {
 }
 
 #[test]
-fn default_keybind_toggle() {
+fn default_keybind_open_formatted() {
     let cfg = Config::default();
-    assert_eq!(cfg.keybind.toggle, "Super+Shift+V");
+    assert_eq!(cfg.keybind.open_formatted, "Super+V");
+}
+
+#[test]
+fn default_keybind_open_plain() {
+    let cfg = Config::default();
+    assert_eq!(cfg.keybind.open_plain, "Super+Shift+V");
 }
 
 #[test]
@@ -192,7 +198,8 @@ fn empty_toml_gives_all_defaults() {
     let cfg = parse("");
     assert_eq!(cfg.general.max_entries, 1000);
     assert_eq!(cfg.ui.theme, "auto");
-    assert_eq!(cfg.keybind.toggle, "Super+Shift+V");
+    assert_eq!(cfg.keybind.open_formatted, "Super+V");
+    assert_eq!(cfg.keybind.open_plain, "Super+Shift+V");
     assert!(cfg.ignore.respect_sensitive_hints);
 }
 
@@ -252,11 +259,11 @@ fn keybind_section_parses_custom_values() {
     let cfg = parse(
         r#"
 [keybind]
-toggle = "Ctrl+Alt+V"
+open_formatted = "Ctrl+Alt+V"
 pin = "Ctrl+G"
 "#,
     );
-    assert_eq!(cfg.keybind.toggle, "Ctrl+Alt+V");
+    assert_eq!(cfg.keybind.open_formatted, "Ctrl+Alt+V");
     assert_eq!(cfg.keybind.pin, "Ctrl+G");
     // Unprovided keys stay as default.
     assert_eq!(cfg.keybind.restore_original, "Return");
@@ -308,7 +315,8 @@ fn full_config_round_trip_via_toml_string() {
             position: "bottom-right".to_string(),
         },
         keybind: KeybindConfig {
-            toggle: "Super+V".to_string(),
+            open_formatted: "Super+V".to_string(),
+            open_plain: "Super+Shift+V".to_string(),
             restore_original: "Return".to_string(),
             restore_plain: "Shift+Return".to_string(),
             delete: "Delete".to_string(),
@@ -329,7 +337,8 @@ fn full_config_round_trip_via_toml_string() {
     assert_eq!(loaded.general.retention, Retention::Days7);
     assert_eq!(loaded.ui.theme, "dark");
     assert_eq!(loaded.ui.width, 720);
-    assert_eq!(loaded.keybind.toggle, "Super+V");
+    assert_eq!(loaded.keybind.open_formatted, "Super+V");
+    assert_eq!(loaded.keybind.open_plain, "Super+Shift+V");
     assert_eq!(loaded.ignore.apps, vec!["com.example.App"]);
     assert_eq!(loaded.ignore.patterns, vec![r"^secret_"]);
 }

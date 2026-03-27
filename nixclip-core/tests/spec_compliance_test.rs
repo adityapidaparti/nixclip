@@ -615,7 +615,8 @@ fn ui_config_defaults_match_spec() {
 #[test]
 fn keybind_config_defaults_match_spec() {
     let kb = Config::default().keybind;
-    assert_eq!(kb.toggle, "Super+Shift+V");
+    assert_eq!(kb.open_formatted, "Super+V");
+    assert_eq!(kb.open_plain, "Super+Shift+V");
     assert_eq!(kb.restore_original, "Return");
     assert_eq!(kb.restore_plain, "Shift+Return");
     assert_eq!(kb.delete, "Ctrl+BackSpace");

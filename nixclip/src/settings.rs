@@ -251,10 +251,15 @@ fn build_about_page(state: &Rc<RefCell<Config>>) -> adw::PreferencesPage {
     let shortcut_group = adw::PreferencesGroup::new();
     shortcut_group.set_title("Shortcuts");
 
-    let shortcut_row = adw::ActionRow::new();
-    shortcut_row.set_title("Global Shortcut");
-    shortcut_row.set_subtitle(&state.borrow().keybind.toggle);
-    shortcut_group.add(&shortcut_row);
+    let formatted_row = adw::ActionRow::new();
+    formatted_row.set_title("Paste with Formatting");
+    formatted_row.set_subtitle(&state.borrow().keybind.open_formatted);
+    shortcut_group.add(&formatted_row);
+
+    let plain_row = adw::ActionRow::new();
+    plain_row.set_title("Paste without Formatting");
+    plain_row.set_subtitle(&state.borrow().keybind.open_plain);
+    shortcut_group.add(&plain_row);
 
     let configure_row = adw::ActionRow::new();
     configure_row.set_title("Configure Shortcut");

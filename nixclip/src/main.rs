@@ -12,6 +12,10 @@ use gtk4::gio;
 use gtk4::glib;
 use libadwaita as adw;
 
+fn plain_mode_from_args(args: &[std::ffi::OsString]) -> bool {
+    args.iter().skip(1).any(|arg| arg == "--plain")
+}
+
 fn activation_token_from_args(args: &[std::ffi::OsString]) -> Option<String> {
     let mut iter = args.iter().skip(1);
     while let Some(arg) = iter.next() {
@@ -52,19 +56,35 @@ fn main() {
         Some("TOKEN"),
     );
 
+    application.add_main_option(
+        "plain",
+        0.into(),
+        glib::OptionFlags::NONE,
+        glib::OptionArg::None,
+        "Default paste action uses plain text instead of original format",
+        None,
+    );
+
     let state = Rc::new(RefCell::new(None));
 
     application.connect_activate({
         let state = state.clone();
         move |app| {
             let activation_token = activation_token_from_env();
-            app::activate(app, &state, activation_token.as_deref());
+            app::activate(app, &state, activation_token.as_deref(), false);
         }
     });
 
     application.connect_command_line({
         let state = state.clone();
         move |app, command_line| {
+            let plain = command_line
+                .options_dict()
+                .contains("plain")
+                || {
+                    let args = command_line.arguments();
+                    plain_mode_from_args(&args)
+                };
             let activation_token = command_line
                 .options_dict()
                 .lookup::<String>("activation-token")
@@ -75,7 +95,7 @@ fn main() {
                     activation_token_from_args(&args)
                 })
                 .or_else(activation_token_from_env);
-            app::activate(app, &state, activation_token.as_deref());
+            app::activate(app, &state, activation_token.as_deref(), plain);
             0
         }
     });

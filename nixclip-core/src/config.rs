@@ -164,7 +164,11 @@ impl Default for UiConfig {
 // KeybindConfig
 // ---------------------------------------------------------------------------
 
-fn default_toggle() -> String {
+fn default_open_formatted() -> String {
+    "Super+V".to_string()
+}
+
+fn default_open_plain() -> String {
     "Super+Shift+V".to_string()
 }
 
@@ -190,8 +194,11 @@ fn default_clear_all() -> String {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeybindConfig {
-    #[serde(default = "default_toggle")]
-    pub toggle: String,
+    #[serde(default = "default_open_formatted")]
+    pub open_formatted: String,
+
+    #[serde(default = "default_open_plain")]
+    pub open_plain: String,
 
     #[serde(default = "default_restore_original")]
     pub restore_original: String,
@@ -212,7 +219,8 @@ pub struct KeybindConfig {
 impl Default for KeybindConfig {
     fn default() -> Self {
         Self {
-            toggle: default_toggle(),
+            open_formatted: default_open_formatted(),
+            open_plain: default_open_plain(),
             restore_original: default_restore_original(),
             restore_plain: default_restore_plain(),
             delete: default_delete(),

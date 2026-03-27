@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -23,6 +23,7 @@ pub(crate) struct UiHandle {
     ipc: Rc<UiIpcClient>,
     popup: Rc<PopupWindow>,
     query_state: Rc<RefCell<QueryState>>,
+    plain_mode: Rc<Cell<bool>>,
 }
 
 impl UiHandle {
@@ -33,8 +34,9 @@ impl UiHandle {
         let ipc = Rc::new(UiIpcClient::new(&socket_path));
         let popup = Rc::new(PopupWindow::new(app, &config));
         let query_state = Rc::new(RefCell::new(QueryState::default()));
+        let plain_mode = Rc::new(Cell::new(false));
 
-        setup_actions(&popup, &ipc, &query_state);
+        setup_actions(&popup, &ipc, &query_state, &plain_mode);
         setup_search(&popup, &ipc, &query_state);
         setup_filters(&popup, &ipc, &query_state);
 
@@ -42,10 +44,12 @@ impl UiHandle {
             ipc,
             popup,
             query_state,
+            plain_mode,
         }
     }
 
-    fn present(&self, activation_token: Option<&str>) {
+    fn present(&self, activation_token: Option<&str>, plain: bool) {
+        self.plain_mode.set(plain);
         self.query_state.replace(QueryState::default());
         self.popup.search_bar().clear();
         self.popup.set_filter(None);
@@ -64,6 +68,7 @@ pub(crate) fn activate(
     app: &adw::Application,
     state: &Rc<RefCell<Option<UiHandle>>>,
     activation_token: Option<&str>,
+    plain: bool,
 ) {
     let mut state = state.borrow_mut();
     if state.is_none() {
@@ -71,7 +76,7 @@ pub(crate) fn activate(
     }
 
     if let Some(ui) = state.as_ref() {
-        ui.present(activation_token);
+        ui.present(activation_token, plain);
     }
 }
 
@@ -79,13 +84,22 @@ fn setup_actions(
     popup: &Rc<PopupWindow>,
     ipc: &Rc<UiIpcClient>,
     query_state: &Rc<RefCell<QueryState>>,
+    plain_mode: &Rc<Cell<bool>>,
 ) {
     let win = &popup.window;
 
     add_action(win, "restore-original", None, {
         let p = popup.clone();
         let i = ipc.clone();
-        move |_, _| restore_selected_entry(&p, &i, RestoreMode::Original, "restore failed")
+        let pm = plain_mode.clone();
+        move |_, _| {
+            let mode = if pm.get() {
+                RestoreMode::PlainText
+            } else {
+                RestoreMode::Original
+            };
+            restore_selected_entry(&p, &i, mode, "restore failed")
+        }
     });
 
     add_action(win, "restore-plain", None, {
