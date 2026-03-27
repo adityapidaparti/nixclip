@@ -9,7 +9,33 @@ Three components:
 
 ## Install
 
-Add the NixClip flake input and enable the service in your `configuration.nix`:
+Requires a flake-based NixOS system. You will edit two files: your `flake.nix` and your `configuration.nix`.
+
+**1.** Add the NixClip input to your `flake.nix`:
+
+```nix
+# flake.nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    nixclip.url = "github:adityapidaparti/nixclip";
+    # ... your other inputs
+  };
+
+  outputs = inputs@{ self, nixpkgs, ... }: {
+    nixosConfigurations.your-hostname = nixpkgs.lib.nixosSystem {
+      specialArgs = { inherit inputs; };
+      modules = [ ./configuration.nix ];
+    };
+  };
+}
+```
+
+> If you already have a `flake.nix`, just add the `nixclip` line to your existing
+> `inputs` block. The key part is that `inputs` must be passed to your modules
+> via `specialArgs` — if you already do this, no other changes to `flake.nix` are needed.
+
+**2.** Enable NixClip in your `configuration.nix`:
 
 ```nix
 # configuration.nix
@@ -24,7 +50,7 @@ Add the NixClip flake input and enable the service in your `configuration.nix`:
 }
 ```
 
-Then rebuild:
+**3.** Rebuild:
 
 ```bash
 sudo nixos-rebuild switch
