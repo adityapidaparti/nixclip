@@ -13,11 +13,10 @@ in
       type = lib.types.nullOr lib.types.package;
       default = null;
       description = ''
-        The NixClip package to use. You must set this explicitly; add the
-        NixClip flake as an input and pass its package here.
+        The NixClip package to use. You must set this explicitly.
 
-        Example flake usage:
-          programs.nixclip.package = inputs.nixclip.packages.''${pkgs.system}.default;
+        Example:
+          programs.nixclip.package = pkgs.callPackage /path/to/nixclip {};
       '';
     };
 
@@ -51,7 +50,7 @@ in
         assertion = cfg.package != null;
         message = ''
           programs.nixclip.package must be set.
-          Add the NixClip flake as an input and point this option to the package.
+          See the NixClip README for installation instructions.
         '';
       }
     ];

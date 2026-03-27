@@ -9,54 +9,44 @@ Three components:
 
 ## Install
 
-Requires a flake-based NixOS system. You will edit two files: your `flake.nix` and your `configuration.nix`.
-
-**1.** Add the NixClip input to your `flake.nix`:
-
-```nix
-# flake.nix
-{
-  inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
-    nixclip.url = "github:adityapidaparti/nixclip";
-    # ... your other inputs
-  };
-
-  outputs = inputs@{ self, nixpkgs, ... }: {
-    nixosConfigurations.your-hostname = nixpkgs.lib.nixosSystem {
-      specialArgs = { inherit inputs; };
-      modules = [ ./configuration.nix ];
-    };
-  };
-}
-```
-
-> If you already have a `flake.nix`, just add the `nixclip` line to your existing
-> `inputs` block. The key part is that `inputs` must be passed to your modules
-> via `specialArgs` — if you already do this, no other changes to `flake.nix` are needed.
-
-**2.** Enable NixClip in your `configuration.nix`:
+Add the following to your `configuration.nix`:
 
 ```nix
 # configuration.nix
-{ inputs, pkgs, ... }:
+{ pkgs, ... }:
+
+let
+  nixclip-src = builtins.fetchTarball {
+    url = "https://github.com/adityapidaparti/nixclip/archive/main.tar.gz";
+    # Pin a specific revision for reproducibility:
+    # url = "https://github.com/adityapidaparti/nixclip/archive/<commit-sha>.tar.gz";
+    # sha256 = "...";
+  };
+  nixclip-pkg = pkgs.callPackage nixclip-src {};
+in
 {
-  imports = [ inputs.nixclip.nixosModules.default ];
+  imports = [ "${nixclip-src}/nix/module.nix" ];
 
   services.nixclip = {
     enable = true;
-    package = inputs.nixclip.packages.${pkgs.system}.default;
+    package = nixclip-pkg;
   };
 }
 ```
 
-**3.** Rebuild:
+Then rebuild:
 
 ```bash
 sudo nixos-rebuild switch
 ```
 
-This installs all three binaries (`nixclipd`, `nixclip`, `nixclip-ui`) and starts a systemd user service that runs automatically with your graphical session.
+This fetches the NixClip source, builds it, imports the NixOS module, and starts a systemd user service that runs automatically with your graphical session. You get all three binaries: `nixclipd`, `nixclip`, and `nixclip-ui`.
+
+To pin to a specific version (recommended), replace `main` in the URL with a commit SHA and add the `sha256`. You can get the hash by running:
+
+```bash
+nix-prefetch-url --unpack https://github.com/adityapidaparti/nixclip/archive/<commit-sha>.tar.gz
+```
 
 ## Quick Start
 
