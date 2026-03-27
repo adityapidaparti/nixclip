@@ -9,38 +9,10 @@ Three components:
 
 ## Install
 
-Requires a [flake-based NixOS configuration](https://wiki.nixos.org/wiki/Flakes).
-
-### 1. Add the flake input
-
-In your **`flake.nix`**, add `nixclip` to your inputs:
+Add the NixClip flake input and enable the service in your `configuration.nix`:
 
 ```nix
-{
-  inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
-    nixclip.url = "github:adityapidaparti/nixclip";
-    # ... your other inputs
-  };
-}
-```
-
-Then make sure `inputs` is captured in your outputs function and passed through to your NixOS configuration via `specialArgs`:
-
-```nix
-{
-  outputs = inputs@{ self, nixpkgs, nixclip, ... }: {
-    nixosConfigurations.your-hostname = nixpkgs.lib.nixosSystem {
-      specialArgs = { inherit inputs; };
-      modules = [ ./configuration.nix ];
-    };
-  };
-}
-```
-
-### 2. Enable NixClip in your configuration.nix
-
-```nix
+# configuration.nix
 { inputs, pkgs, ... }:
 {
   imports = [ inputs.nixclip.nixosModules.default ];
@@ -52,10 +24,10 @@ Then make sure `inputs` is captured in your outputs function and passed through 
 }
 ```
 
-### 3. Rebuild
+Then rebuild:
 
 ```bash
-sudo nixos-rebuild switch --flake /etc/nixos#your-hostname
+sudo nixos-rebuild switch
 ```
 
 This installs all three binaries (`nixclipd`, `nixclip`, `nixclip-ui`) and starts a systemd user service that runs automatically with your graphical session.
