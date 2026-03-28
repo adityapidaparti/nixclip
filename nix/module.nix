@@ -3,6 +3,20 @@
 let
   cfg = config.services.nixclip;
   settingsFormat = pkgs.formats.toml { };
+
+  # Resolve keybinds from settings or fall back to defaults.
+  openFormatted = cfg.settings.keybind.open_formatted or "Super+V";
+  openPlain = cfg.settings.keybind.open_plain or "Super+Shift+V";
+
+  # Convert "Super+Shift+V" → "<Super><Shift>v" for GNOME dconf.
+  toGnomeBinding = str:
+    let
+      parts = lib.splitString "+" str;
+      mods = lib.init parts;
+      key = lib.toLower (lib.last parts);
+      wrappedMods = lib.concatMapStrings (m: "<${m}>") mods;
+    in
+    "${wrappedMods}${key}";
 in
 
 {
@@ -54,8 +68,40 @@ in
       }
     ];
 
-    # Free Super+V from GNOME's notification tray so NixClip can use it.
-    dconf.settings."org/gnome/shell/keybindings".toggle-message-tray = [ "" ];
+    # Enable dconf so GNOME picks up our keybinding overrides.
+    programs.dconf.enable = true;
+
+    # Set up GNOME custom keyboard shortcuts via dconf.
+    # This is more reliable than the XDG GlobalShortcuts portal for
+    # native (non-Flatpak) apps on GNOME.
+    programs.dconf.profiles.user.databases = [{
+      settings = {
+        # Free Super+V from GNOME's notification tray.
+        "org/gnome/shell/keybindings" = {
+          toggle-message-tray = lib.gvariant.mkEmptyArray lib.gvariant.type.string;
+        };
+
+        # Register NixClip custom shortcuts.
+        "org/gnome/settings-daemon/plugins/media-keys" = {
+          custom-keybindings = [
+            "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/nixclip0/"
+            "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/nixclip1/"
+          ];
+        };
+
+        "org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/nixclip0" = {
+          name = "NixClip (paste with formatting)";
+          command = "${cfg.package}/bin/nixclip-ui";
+          binding = toGnomeBinding openFormatted;
+        };
+
+        "org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/nixclip1" = {
+          name = "NixClip (paste as plain text)";
+          command = "${cfg.package}/bin/nixclip-ui --plain";
+          binding = toGnomeBinding openPlain;
+        };
+      };
+    }];
 
     # Make both the daemon and the GUI client available system-wide.
     environment.systemPackages = lib.mkIf (cfg.package != null) [ cfg.package ];
@@ -64,7 +110,7 @@ in
     # the user's clipboard over Wayland / X11.
     systemd.user.services.nixclipd = {
       description = "NixClip clipboard daemon";
-      documentation = [ "https://github.com/your-org/nixclip" ];
+      documentation = [ "https://github.com/adityapidaparti/nixclip" ];
       partOf = [ "graphical-session.target" ];
       after = [ "graphical-session.target" ];
       wantedBy = [ "graphical-session.target" ];
@@ -82,6 +128,12 @@ in
         NoNewPrivileges = true;
 
         Type = "simple";
+      };
+
+      # Import graphical session environment so the daemon can find the
+      # Wayland compositor (WAYLAND_DISPLAY) and D-Bus session bus.
+      environment = {
+        WAYLAND_DISPLAY = "wayland-1";
       };
     };
 
