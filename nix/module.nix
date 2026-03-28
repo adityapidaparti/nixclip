@@ -76,9 +76,9 @@ in
     # native (non-Flatpak) apps on GNOME.
     programs.dconf.profiles.user.databases = [{
       settings = {
-        # Free Super+V from GNOME's notification tray.
+        # Free Super+V from GNOME's notification tray but keep Super+M.
         "org/gnome/shell/keybindings" = {
-          toggle-message-tray = lib.gvariant.mkEmptyArray lib.gvariant.type.string;
+          toggle-message-tray = [ "<Super>m" ];
         };
 
         # Register NixClip custom shortcuts.
@@ -128,12 +128,16 @@ in
         NoNewPrivileges = true;
 
         Type = "simple";
-      };
 
-      # Import graphical session environment so the daemon can find the
-      # Wayland compositor (WAYLAND_DISPLAY) and D-Bus session bus.
-      environment = {
-        WAYLAND_DISPLAY = "wayland-1";
+        # Import WAYLAND_DISPLAY, DISPLAY, etc. from the graphical session
+        # so the daemon can connect to the compositor. The actual socket name
+        # is session-specific (wayland-0, wayland-1, etc.), so we must not
+        # hardcode it.
+        PassEnvironment = [
+          "WAYLAND_DISPLAY"
+          "DISPLAY"
+          "XDG_SESSION_TYPE"
+        ];
       };
     };
 
