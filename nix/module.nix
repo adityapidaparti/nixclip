@@ -54,6 +54,9 @@ in
       }
     ];
 
+    # Free Super+V from GNOME's notification tray so NixClip can use it.
+    dconf.settings."org/gnome/shell/keybindings".toggle-message-tray = [ "" ];
+
     # Make both the daemon and the GUI client available system-wide.
     environment.systemPackages = lib.mkIf (cfg.package != null) [ cfg.package ];
 
