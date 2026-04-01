@@ -4,11 +4,12 @@ mod pruning;
 mod screen_lock;
 mod watcher;
 
+use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use nixclip_core::config::Config;
-use nixclip_core::error::Result;
+use nixclip_core::error::{NixClipError, Result};
 use nixclip_core::pipeline::PrivacyFilter;
 use nixclip_core::search::SearchEngine;
 use nixclip_core::storage::ClipStore;
@@ -29,6 +30,9 @@ pub struct AppState {
 
     /// Current configuration, reloadable at runtime.
     pub config: tokio::sync::RwLock<Config>,
+
+    /// The config file this daemon instance loaded.
+    pub config_path: PathBuf,
 
     /// Privacy filter built from the current ignore rules.
     pub privacy_filter: tokio::sync::RwLock<PrivacyFilter>,
@@ -98,26 +102,23 @@ async fn run() -> Result<()> {
     // -----------------------------------------------------------------------
     // Configuration
     // -----------------------------------------------------------------------
-    let config = match &cli.config_path {
-        Some(path) => Config::load(path).unwrap_or_else(|e| {
-            tracing::warn!(path, error = %e, "failed to load config; using defaults");
-            Config::default()
-        }),
-        None => Config::load_or_default(),
-    };
-
     let config_path = cli
         .config_path
         .as_deref()
-        .map(String::from)
-        .unwrap_or_else(|| Config::config_path().display().to_string());
+        .map(PathBuf::from)
+        .or_else(Config::existing_config_path)
+        .unwrap_or_else(Config::config_path);
+    let config = match &cli.config_path {
+        Some(path) => Config::load(path)?,
+        None => Config::load_or_default()?,
+    };
 
     let db_path = Config::db_path();
     let blob_dir = Config::blob_dir();
 
     info!(
         version = env!("CARGO_PKG_VERSION"),
-        config_path = %config_path,
+        config_path = %config_path.display(),
         db_path = %db_path.display(),
         "nixclipd starting"
     );
@@ -127,7 +128,9 @@ async fn run() -> Result<()> {
     // -----------------------------------------------------------------------
     std::fs::create_dir_all(Config::data_dir()).map_err(nixclip_core::NixClipError::Io)?;
     std::fs::create_dir_all(&blob_dir).map_err(nixclip_core::NixClipError::Io)?;
-    std::fs::create_dir_all(Config::config_dir()).map_err(nixclip_core::NixClipError::Io)?;
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent).map_err(nixclip_core::NixClipError::Io)?;
+    }
 
     // -----------------------------------------------------------------------
     // Open ClipStore
@@ -137,16 +140,14 @@ async fn run() -> Result<()> {
     // -----------------------------------------------------------------------
     // Build shared state
     // -----------------------------------------------------------------------
-    let privacy_filter = PrivacyFilter::new(&config.ignore).unwrap_or_else(|e| {
-        tracing::warn!(error = %e, "failed to compile privacy filter patterns; using permissive defaults");
-        PrivacyFilter::new(&Default::default()).expect("default privacy filter must compile")
-    });
+    let privacy_filter = PrivacyFilter::new(&config.ignore)?;
     let search_engine = SearchEngine::new(db_path.clone());
     let (new_entry_tx, _initial_rx) = tokio::sync::broadcast::channel::<EntrySummary>(256);
 
     let state = Arc::new(AppState {
         store: std::sync::Mutex::new(store),
         config: tokio::sync::RwLock::new(config),
+        config_path: config_path.clone(),
         privacy_filter: tokio::sync::RwLock::new(privacy_filter),
         search_engine,
         is_locked: AtomicBool::new(false),
@@ -156,47 +157,46 @@ async fn run() -> Result<()> {
     // -----------------------------------------------------------------------
     // Spawn subsystems
     // -----------------------------------------------------------------------
-    let watcher_handle = tokio::spawn({
+    // The watcher is non-critical: if clipboard capture fails (e.g. no
+    // Wayland data-control protocol), the daemon should keep running so
+    // IPC, pruning, and hotkey listening still work.
+    tokio::spawn({
         let s = state.clone();
         async move {
-            if let Err(e) = watcher::run(s).await {
-                error!(error = %e, "watcher exited with error");
+            match watcher::run(s).await {
+                Ok(()) => tracing::warn!("clipboard watcher exited (no backend available or wl-paste stopped)"),
+                Err(e) => tracing::warn!(error = %e, "clipboard watcher exited with error"),
+            }
+        }
+    });
+    let ipc_handle = tokio::spawn(ipc_server::run(state.clone()));
+
+    tokio::spawn({
+        let s = state.clone();
+        async move {
+            match hotkey::run(s).await {
+                Ok(()) => info!("hotkey listener exited"),
+                Err(e) => error!(error = %e, "hotkey listener exited with error"),
             }
         }
     });
 
-    let ipc_handle = tokio::spawn({
+    tokio::spawn({
         let s = state.clone();
         async move {
-            if let Err(e) = ipc_server::run(s).await {
-                error!(error = %e, "ipc server exited with error");
+            match screen_lock::run(s).await {
+                Ok(()) => info!("screen lock listener exited"),
+                Err(e) => error!(error = %e, "screen lock listener exited with error"),
             }
         }
     });
 
-    let hotkey_handle = tokio::spawn({
+    tokio::spawn({
         let s = state.clone();
         async move {
-            if let Err(e) = hotkey::run(s).await {
-                error!(error = %e, "hotkey listener exited with error");
-            }
-        }
-    });
-
-    let screen_lock_handle = tokio::spawn({
-        let s = state.clone();
-        async move {
-            if let Err(e) = screen_lock::run(s).await {
-                error!(error = %e, "screen lock listener exited with error");
-            }
-        }
-    });
-
-    let pruning_handle = tokio::spawn({
-        let s = state.clone();
-        async move {
-            if let Err(e) = pruning::run(s).await {
-                error!(error = %e, "pruning task exited with error");
+            match pruning::run(s).await {
+                Ok(()) => info!("pruning task exited"),
+                Err(e) => error!(error = %e, "pruning task exited with error"),
             }
         }
     });
@@ -204,7 +204,7 @@ async fn run() -> Result<()> {
     info!("all subsystems started");
 
     // -----------------------------------------------------------------------
-    // Wait for shutdown signal or any task to exit
+    // Wait for shutdown signal or critical task exit.
     // -----------------------------------------------------------------------
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {
@@ -213,20 +213,8 @@ async fn run() -> Result<()> {
         _ = signal_terminate() => {
             info!("received SIGTERM, shutting down");
         }
-        _ = watcher_handle => {
-            info!("watcher task exited");
-        }
-        _ = ipc_handle => {
-            info!("ipc server task exited");
-        }
-        _ = hotkey_handle => {
-            info!("hotkey task exited");
-        }
-        _ = screen_lock_handle => {
-            info!("screen lock task exited");
-        }
-        _ = pruning_handle => {
-            info!("pruning task exited");
+        result = ipc_handle => {
+            critical_task_result("ipc server", result)?;
         }
     }
 
@@ -274,6 +262,23 @@ async fn signal_terminate() {
     use tokio::signal::unix::{signal, SignalKind};
     let mut sig = signal(SignalKind::terminate()).expect("failed to register SIGTERM handler");
     sig.recv().await;
+}
+
+fn critical_task_result(
+    task_name: &str,
+    result: std::result::Result<Result<()>, tokio::task::JoinError>,
+) -> Result<()> {
+    match result {
+        Ok(Ok(())) => Err(NixClipError::Pipeline(format!(
+            "{task_name} exited unexpectedly"
+        ))),
+        Ok(Err(error)) => Err(NixClipError::Pipeline(format!(
+            "{task_name} exited with error: {error}"
+        ))),
+        Err(error) => Err(NixClipError::Pipeline(format!(
+            "{task_name} task crashed: {error}"
+        ))),
+    }
 }
 
 #[cfg(not(unix))]

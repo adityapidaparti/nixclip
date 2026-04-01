@@ -282,7 +282,7 @@ impl WlPasteBackend {
         let mut child = Command::new("wl-paste")
             .args(["--watch", "echo", "__NIXCLIP_CHANGE__"])
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
             .spawn()
             .map_err(|e| NixClipError::Wayland(format!("failed to spawn wl-paste: {e}")))?;
 
@@ -334,7 +334,22 @@ impl WlPasteBackend {
             }
         }
 
-        let _ = child.kill().await;
+        // wl-paste exited — log why so we can diagnose protocol issues.
+        match child.wait_with_output().await {
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let code = output.status.code();
+                warn!(
+                    exit_code = ?code,
+                    stderr = %stderr.trim(),
+                    "wl-paste --watch exited"
+                );
+            }
+            Err(e) => {
+                warn!(error = %e, "failed to collect wl-paste exit status");
+                let _ = child.kill().await;
+            }
+        }
         Ok(())
     }
 
@@ -470,7 +485,7 @@ pub async fn run(state: Arc<AppState>) -> Result<()> {
 async fn process_events(state: Arc<AppState>, mut rx: mpsc::Receiver<ClipboardEvent>) {
     info!("clipboard watcher started");
     while let Some(event) = rx.recv().await {
-        if let Err(e) = handle_event(&state, event).await {
+        if let Err(e) = handle_event(state.clone(), event).await {
             warn!(error = %e, "failed to process clipboard event");
         }
     }
@@ -483,7 +498,7 @@ async fn process_events(state: Arc<AppState>, mut rx: mpsc::Receiver<ClipboardEv
 /// patterns (e.g. API-key detection) run *after* the content processor has
 /// produced the preview text, while cheaper app-name / MIME-type checks
 /// still short-circuit before the expensive processing step.
-async fn handle_event(state: &AppState, event: ClipboardEvent) -> Result<()> {
+async fn handle_event(state: Arc<AppState>, event: ClipboardEvent) -> Result<()> {
     let ClipboardEvent {
         offered_mimes,
         payloads,
@@ -539,12 +554,17 @@ async fn handle_event(state: &AppState, event: ClipboardEvent) -> Result<()> {
     // Insert into the store (via spawn_blocking since rusqlite is !Send-safe
     // across await points when wrapped in std::sync::Mutex).
     let summary = {
-        let store = state
-            .store
-            .lock()
-            .map_err(|e| NixClipError::Pipeline(format!("store lock poisoned: {e}")))?;
-        store.insert(new_entry)?
-    };
+        let state = state.clone();
+        tokio::task::spawn_blocking(move || {
+            let store = state
+                .store
+                .lock()
+                .map_err(|e| NixClipError::Pipeline(format!("store lock poisoned: {e}")))?;
+            store.insert(new_entry)
+        })
+        .await
+        .map_err(|e| NixClipError::Pipeline(format!("store task failed: {e}")))?
+    }?;
 
     if let Some(entry_id) = summary {
         debug!(id = entry_id, class = %processed.content_class, "new entry stored");
