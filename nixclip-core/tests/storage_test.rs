@@ -242,6 +242,44 @@ fn dedup_different_hash_inserts_new_entry() {
     assert_eq!(stats.entry_count, 2);
 }
 
+#[test]
+fn dedup_only_applies_to_most_recent_entry() {
+    let (store, _dir) = open_temp_store();
+
+    let mut hash = [0u8; 32];
+    hash[0] = 77;
+
+    let duplicate = NewEntry {
+        content_class: ContentClass::Text,
+        preview_text: Some("same hash".to_string()),
+        canonical_hash: hash,
+        representations: vec![MimePayload {
+            mime: "text/plain".to_string(),
+            data: b"same hash".to_vec(),
+        }],
+        source_app: None,
+        ephemeral: false,
+        metadata: EntryMetadata::default(),
+    };
+
+    let first_id = store
+        .insert(duplicate.clone())
+        .expect("insert first duplicate")
+        .expect("first duplicate should insert");
+    store
+        .insert(make_entry(2, ContentClass::Text, "break dedup window"))
+        .expect("insert middle entry")
+        .expect("middle entry should insert");
+    let second_id = store
+        .insert(duplicate)
+        .expect("insert second duplicate")
+        .expect("non-consecutive duplicate should insert");
+
+    assert_ne!(first_id, second_id);
+    let stats = store.stats().expect("stats");
+    assert_eq!(stats.entry_count, 3);
+}
+
 // ---------------------------------------------------------------------------
 // Blob threshold
 // ---------------------------------------------------------------------------
@@ -377,6 +415,64 @@ fn delete_multiple_entries() {
 
     let stats = store.stats().expect("stats");
     assert_eq!(stats.entry_count, 1);
+}
+
+#[test]
+fn delete_keeps_shared_blob_for_remaining_entry() {
+    let (store, _dir) = open_temp_store();
+    let large_data = vec![0xCD_u8; 65 * 1024];
+
+    let entry1 = NewEntry {
+        content_class: ContentClass::Image,
+        preview_text: Some("shared blob one".to_string()),
+        canonical_hash: {
+            let mut hash = [0u8; 32];
+            hash[0] = 10;
+            hash
+        },
+        representations: vec![MimePayload {
+            mime: "image/png".to_string(),
+            data: large_data.clone(),
+        }],
+        source_app: None,
+        ephemeral: false,
+        metadata: EntryMetadata::default(),
+    };
+
+    let entry2 = NewEntry {
+        content_class: ContentClass::Image,
+        preview_text: Some("shared blob two".to_string()),
+        canonical_hash: {
+            let mut hash = [0u8; 32];
+            hash[0] = 11;
+            hash
+        },
+        representations: vec![MimePayload {
+            mime: "image/png".to_string(),
+            data: large_data.clone(),
+        }],
+        source_app: None,
+        ephemeral: false,
+        metadata: EntryMetadata::default(),
+    };
+
+    let id1 = store
+        .insert(entry1)
+        .expect("insert first shared blob entry")
+        .expect("first shared blob entry should insert");
+    let id2 = store
+        .insert(entry2)
+        .expect("insert second shared blob entry")
+        .expect("second shared blob entry should insert");
+
+    store.delete(&[id1]).expect("delete first entry");
+
+    let reps = store
+        .get_representations(id2)
+        .expect("load representations for surviving entry");
+    assert_eq!(reps.len(), 1);
+    assert_eq!(reps[0].mime, "image/png");
+    assert_eq!(reps[0].data, large_data);
 }
 
 // ---------------------------------------------------------------------------

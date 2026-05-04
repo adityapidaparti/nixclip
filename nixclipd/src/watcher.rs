@@ -347,7 +347,6 @@ impl WlPasteBackend {
             }
             Err(e) => {
                 warn!(error = %e, "failed to collect wl-paste exit status");
-                let _ = child.kill().await;
             }
         }
         Ok(())

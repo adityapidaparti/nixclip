@@ -24,7 +24,7 @@ pub async fn run(state: Arc<AppState>) -> Result<()> {
     loop {
         interval.tick().await;
 
-        match run_once(&state).await {
+        match run_once(state.clone()).await {
             Ok(stats) => {
                 if stats.entries_deleted > 0 || stats.blobs_deleted > 0 {
                     info!(
@@ -47,34 +47,37 @@ pub async fn run(state: Arc<AppState>) -> Result<()> {
 /// This performs both the standard retention/max-entries pruning **and**
 /// ephemeral-entry cleanup (entries flagged as ephemeral that have exceeded
 /// their TTL).
-pub async fn run_once(state: &AppState) -> Result<PruneStats> {
+pub async fn run_once(state: Arc<AppState>) -> Result<PruneStats> {
     let config = state.config.read().await;
     let general = config.general.clone();
     drop(config);
 
-    let store = state
-        .store
-        .lock()
-        .map_err(|e| nixclip_core::NixClipError::Config(format!("store mutex poisoned: {e}")))?;
+    tokio::task::spawn_blocking(move || {
+        let store = state.store.lock().map_err(|e| {
+            nixclip_core::NixClipError::Config(format!("store mutex poisoned: {e}"))
+        })?;
 
-    // Standard retention / max-entries pruning.
-    let mut stats = store.prune(&general)?;
+        // Standard retention / max-entries pruning.
+        let mut stats = store.prune(&general)?;
 
-    // Ephemeral entry cleanup — delete entries marked ephemeral whose
-    // created_at is older than the configured TTL.
-    let ephemeral_stats = store.prune_ephemeral(general.ephemeral_ttl_hours)?;
+        // Ephemeral entry cleanup — delete entries marked ephemeral whose
+        // created_at is older than the configured TTL.
+        let ephemeral_stats = store.prune_ephemeral(general.ephemeral_ttl_hours)?;
 
-    if ephemeral_stats.entries_deleted > 0 {
-        info!(
-            entries_deleted = ephemeral_stats.entries_deleted,
-            "ephemeral entries pruned"
-        );
-    }
+        if ephemeral_stats.entries_deleted > 0 {
+            info!(
+                entries_deleted = ephemeral_stats.entries_deleted,
+                "ephemeral entries pruned"
+            );
+        }
 
-    // Merge the ephemeral stats into the overall stats.
-    stats.entries_deleted += ephemeral_stats.entries_deleted;
-    stats.blobs_deleted += ephemeral_stats.blobs_deleted;
-    stats.bytes_freed += ephemeral_stats.bytes_freed;
+        // Merge the ephemeral stats into the overall stats.
+        stats.entries_deleted += ephemeral_stats.entries_deleted;
+        stats.blobs_deleted += ephemeral_stats.blobs_deleted;
+        stats.bytes_freed += ephemeral_stats.bytes_freed;
 
-    Ok(stats)
+        Ok(stats)
+    })
+    .await
+    .map_err(|e| nixclip_core::NixClipError::Config(format!("prune task failed: {e}")))?
 }

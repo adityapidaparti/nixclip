@@ -308,18 +308,18 @@ impl PopupWindow {
                 }
 
                 _ if !ctrl && !shift => {
-                    if let Some(ch) = keyval.to_unicode() {
-                        if ch.is_alphanumeric() || ch.is_ascii_punctuation() || ch == ' ' {
-                            if !search_entry.has_focus() {
-                                search_entry.grab_focus();
-                                let mut pos = search_entry.text().len() as i32;
-                                search_entry.insert_text(&ch.to_string(), &mut pos);
-                                search_entry.set_position(pos);
-                                return glib::Propagation::Stop;
-                            }
+                    match keyval.to_unicode().filter(|ch| {
+                        ch.is_alphanumeric() || ch.is_ascii_punctuation() || *ch == ' '
+                    }) {
+                        Some(ch) if !search_entry.has_focus() => {
+                            search_entry.grab_focus();
+                            let mut pos = search_entry.text().len() as i32;
+                            search_entry.insert_text(&ch.to_string(), &mut pos);
+                            search_entry.set_position(pos);
+                            glib::Propagation::Stop
                         }
+                        _ => glib::Propagation::Proceed,
                     }
-                    glib::Propagation::Proceed
                 }
 
                 _ => glib::Propagation::Proceed,

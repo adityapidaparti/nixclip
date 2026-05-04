@@ -77,23 +77,28 @@ impl ClipStore {
     pub fn insert(&self, entry: NewEntry) -> Result<Option<EntryId>> {
         let now = chrono::Utc::now().timestamp_millis();
 
-        // -- Global dedup check against all entries by canonical_hash --
-        let existing: Option<i64> = self
+        // Deduplicate only against the most recent entry.
+        let most_recent: Option<(EntryId, Vec<u8>)> = self
             .conn
             .query_row(
-                "SELECT id FROM entries WHERE canonical_hash = ?1 LIMIT 1",
-                params![entry.canonical_hash.as_slice()],
-                |row| row.get(0),
+                "SELECT id, canonical_hash
+                 FROM entries
+                 ORDER BY last_seen_at DESC, id DESC
+                 LIMIT 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .ok();
 
-        if let Some(existing_id) = existing {
-            // Bump last_seen_at; pinned status is preserved (not touched).
-            self.conn.execute(
-                "UPDATE entries SET last_seen_at = ?1 WHERE id = ?2",
-                params![now, existing_id],
-            )?;
-            return Ok(None);
+        if let Some((existing_id, existing_hash)) = most_recent {
+            if existing_hash == entry.canonical_hash.as_slice() {
+                // Bump last_seen_at; pinned status is preserved (not touched).
+                self.conn.execute(
+                    "UPDATE entries SET last_seen_at = ?1 WHERE id = ?2",
+                    params![now, existing_id],
+                )?;
+                return Ok(None);
+            }
         }
 
         // -- Full insert inside a transaction --
@@ -292,7 +297,7 @@ impl ClipStore {
     // Delete
     // -------------------------------------------------------------------
 
-    /// Delete the given entries and their blobs.
+    /// Delete the given entries.
     pub fn delete(&self, ids: &[EntryId]) -> Result<()> {
         if ids.is_empty() {
             return Ok(());
@@ -301,9 +306,6 @@ impl ClipStore {
         let tx = self.conn.unchecked_transaction()?;
 
         for &id in ids {
-            // Collect blob paths before deleting.
-            let blob_paths = self.blob_paths_for_entry_tx(&tx, id)?;
-
             // Fetch preview_text before deleting the row so we can remove
             // the FTS entry with the correct original value.
             let (preview_text, source_app): (Option<String>, Option<String>) = tx
@@ -323,14 +325,11 @@ impl ClipStore {
 
             // Delete the entry (cascades to representations).
             tx.execute("DELETE FROM entries WHERE id = ?1", params![id])?;
-
-            // Delete blob files.
-            for path in blob_paths {
-                let _ = self.blob_store.delete(&path);
-            }
         }
 
         tx.commit()?;
+        let valid = self.all_blob_paths()?;
+        let _ = self.blob_store.cleanup_orphans_stats(&valid)?;
         Ok(())
     }
 
@@ -351,22 +350,14 @@ impl ClipStore {
     // Clear unpinned
     // -------------------------------------------------------------------
 
-    /// Delete all unpinned entries and their blobs, then rebuild the FTS index.
+    /// Delete all unpinned entries, then rebuild the FTS index.
     pub fn clear_unpinned(&self) -> Result<()> {
-        let blob_paths = self.collect_blob_paths(
-            "SELECT r.blob_path FROM representations r
-             JOIN entries e ON r.entry_id = e.id
-             WHERE e.pinned = 0 AND r.blob_path IS NOT NULL",
-        )?;
-
         self.conn
             .execute("DELETE FROM entries WHERE pinned = 0", [])?;
 
-        for path in &blob_paths {
-            let _ = self.blob_store.delete(path);
-        }
-
         self.rebuild_fts()?;
+        let valid = self.all_blob_paths()?;
+        let _ = self.blob_store.cleanup_orphans_stats(&valid)?;
         Ok(())
     }
 
@@ -391,7 +382,6 @@ impl ClipStore {
             )?;
 
             if !expired_ids.is_empty() {
-                let blob_paths = self.blob_paths_for_ids_tx(&self.conn, &expired_ids)?;
                 let count = expired_ids.len() as u32;
 
                 let placeholders = placeholders(expired_ids.len());
@@ -401,14 +391,6 @@ impl ClipStore {
                     .map(|id| id as &dyn rusqlite::types::ToSql)
                     .collect();
                 self.conn.execute(&sql, param_refs.as_slice())?;
-
-                for path in &blob_paths {
-                    if let Ok(meta) = std::fs::metadata(self.blob_store.base_dir.join(path)) {
-                        bytes_freed += meta.len();
-                    }
-                    let _ = self.blob_store.delete(path);
-                    blobs_deleted += 1;
-                }
 
                 entries_deleted += count;
             }
@@ -427,7 +409,6 @@ impl ClipStore {
             )?;
 
             if !overflow_ids.is_empty() {
-                let blob_paths = self.blob_paths_for_ids_tx(&self.conn, &overflow_ids)?;
                 let count = overflow_ids.len() as u32;
 
                 let placeholders = placeholders(overflow_ids.len());
@@ -438,22 +419,15 @@ impl ClipStore {
                     .collect();
                 self.conn.execute(&sql, param_refs.as_slice())?;
 
-                for path in &blob_paths {
-                    if let Ok(meta) = std::fs::metadata(self.blob_store.base_dir.join(path)) {
-                        bytes_freed += meta.len();
-                    }
-                    let _ = self.blob_store.delete(path);
-                    blobs_deleted += 1;
-                }
-
                 entries_deleted += count;
             }
         }
 
         // 3. Garbage-collect orphan blobs.
         let valid = self.all_blob_paths()?;
-        let orphan_bytes = self.blob_store.cleanup_orphans(&valid)?;
-        bytes_freed += orphan_bytes;
+        let orphan_stats = self.blob_store.cleanup_orphans_stats(&valid)?;
+        bytes_freed += orphan_stats.bytes_freed;
+        blobs_deleted += orphan_stats.files_deleted;
 
         // Rebuild FTS after bulk deletions.
         if entries_deleted > 0 {
@@ -487,7 +461,6 @@ impl ClipStore {
         )?;
 
         if !expired_ids.is_empty() {
-            let blob_paths = self.blob_paths_for_ids_tx(&self.conn, &expired_ids)?;
             let count = expired_ids.len() as u32;
 
             let ph = placeholders(expired_ids.len());
@@ -498,14 +471,6 @@ impl ClipStore {
                 .collect();
             self.conn.execute(&sql, param_refs.as_slice())?;
 
-            for path in &blob_paths {
-                if let Ok(meta) = std::fs::metadata(self.blob_store.base_dir.join(path)) {
-                    bytes_freed += meta.len();
-                }
-                let _ = self.blob_store.delete(path);
-                blobs_deleted += 1;
-            }
-
             entries_deleted += count;
 
             // Rebuild FTS after deletions.
@@ -513,6 +478,11 @@ impl ClipStore {
                 self.rebuild_fts()?;
             }
         }
+
+        let valid = self.all_blob_paths()?;
+        let orphan_stats = self.blob_store.cleanup_orphans_stats(&valid)?;
+        bytes_freed += orphan_stats.bytes_freed;
+        blobs_deleted += orphan_stats.files_deleted;
 
         Ok(PruneStats {
             entries_deleted,
@@ -624,60 +594,6 @@ impl ClipStore {
             Ok((None, Some(ref path))) => self.blob_store.load(path).ok(),
             _ => None,
         }
-    }
-
-    /// Collect all blob_path values for a single entry inside a transaction.
-    fn blob_paths_for_entry_tx(
-        &self,
-        tx: &rusqlite::Transaction<'_>,
-        id: EntryId,
-    ) -> Result<Vec<String>> {
-        let mut stmt = tx.prepare(
-            "SELECT blob_path FROM representations WHERE entry_id = ?1 AND blob_path IS NOT NULL",
-        )?;
-        let rows = stmt.query_map(params![id], |row| row.get(0))?;
-        let mut paths = Vec::new();
-        for r in rows {
-            paths.push(r?);
-        }
-        Ok(paths)
-    }
-
-    /// Collect blob_path values for a set of entry ids.
-    fn blob_paths_for_ids_tx(
-        &self,
-        conn: &rusqlite::Connection,
-        ids: &[EntryId],
-    ) -> Result<Vec<String>> {
-        if ids.is_empty() {
-            return Ok(Vec::new());
-        }
-        let ph = placeholders(ids.len());
-        let sql = format!(
-            "SELECT blob_path FROM representations WHERE entry_id IN ({ph}) AND blob_path IS NOT NULL"
-        );
-        let mut stmt = conn.prepare(&sql)?;
-        let param_refs: Vec<&dyn rusqlite::types::ToSql> = ids
-            .iter()
-            .map(|id| id as &dyn rusqlite::types::ToSql)
-            .collect();
-        let rows = stmt.query_map(param_refs.as_slice(), |row| row.get(0))?;
-        let mut paths = Vec::new();
-        for r in rows {
-            paths.push(r?);
-        }
-        Ok(paths)
-    }
-
-    /// Collect a simple list of blob paths matching a SQL query.
-    fn collect_blob_paths(&self, sql: &str) -> Result<Vec<String>> {
-        let mut stmt = self.conn.prepare(sql)?;
-        let rows = stmt.query_map([], |row| row.get(0))?;
-        let mut paths = Vec::new();
-        for r in rows {
-            paths.push(r?);
-        }
-        Ok(paths)
     }
 
     /// Collect entry IDs from a parameterized query.

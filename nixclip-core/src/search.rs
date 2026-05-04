@@ -7,10 +7,13 @@ use tracing::{debug, warn};
 use crate::error::Result;
 use crate::{ContentClass, EntryMetadata, EntrySummary, QueryResult};
 
+const SEARCH_HEADROOM: u32 = 500;
+
 // ---------------------------------------------------------------------------
 // SearchEngine
 // ---------------------------------------------------------------------------
 
+#[derive(Clone)]
 pub struct SearchEngine {
     db_path: std::path::PathBuf,
 }
@@ -40,57 +43,51 @@ impl SearchEngine {
         let trimmed = text.trim();
         let normalized_query = normalized_query_text(trimmed);
 
-        // Retrieve candidates from the database (up to 500).
-        let candidates = if trimmed.is_empty() {
-            fetch_all_candidates(&conn, content_class)?
-        } else {
-            let fts_result = fetch_fts_candidates(&conn, trimmed, content_class);
+        if trimmed.is_empty() {
+            let total = count_all_candidates(&conn, content_class)?;
+            let entries = fetch_all_candidates_page(&conn, content_class, offset, limit)?;
+            return Ok(QueryResult { entries, total });
+        }
+
+        let candidate_limit = offset
+            .saturating_add(limit)
+            .saturating_add(SEARCH_HEADROOM)
+            .max(limit);
+
+        // Retrieve candidates from the database.
+        let (candidates, total) = {
+            let fts_result = fetch_fts_candidates(&conn, trimmed, content_class, candidate_limit);
             match fts_result {
-                Ok(rows) if !rows.is_empty() => rows,
+                Ok(rows) if !rows.is_empty() => {
+                    (rows, count_fts_candidates(&conn, trimmed, content_class)?)
+                }
                 Ok(_) => {
-                    // FTS5 returned nothing — try LIKE fallback.
                     debug!("FTS5 returned no results, falling back to LIKE query");
-                    fetch_like_candidates(
-                        &conn,
-                        normalized_query.as_deref().unwrap_or(trimmed),
-                        content_class,
-                    )?
+                    (
+                        fetch_like_candidates(&conn, trimmed, content_class, candidate_limit)?,
+                        count_like_candidates(&conn, trimmed, content_class)?,
+                    )
                 }
                 Err(e) => {
-                    // FTS5 query syntax error or other FTS error — fall back.
                     warn!("FTS5 query failed ({}), falling back to LIKE query", e);
-                    fetch_like_candidates(
-                        &conn,
-                        normalized_query.as_deref().unwrap_or(trimmed),
-                        content_class,
-                    )?
+                    (
+                        fetch_like_candidates(&conn, trimmed, content_class, candidate_limit)?,
+                        count_like_candidates(&conn, trimmed, content_class)?,
+                    )
                 }
             }
         };
 
         // Re-rank candidates with nucleo-matcher (or fallback scorer).
         let now_ms = chrono::Utc::now().timestamp_millis();
-        let mut scored: Vec<(EntrySummary, f64)> = if trimmed.is_empty() {
-            // No query — only recency + pin scoring.
-            candidates
-                .into_iter()
-                .map(|entry| {
-                    let composite = composite_score(0.0, entry.last_seen_at, entry.pinned, now_ms);
-                    (entry, composite)
-                })
-                .collect()
-        } else {
-            score_candidates(
-                candidates,
-                normalized_query.as_deref().unwrap_or(trimmed),
-                now_ms,
-            )
-        };
+        let mut scored = score_candidates(
+            candidates,
+            normalized_query.as_deref().unwrap_or(trimmed),
+            now_ms,
+        );
 
         // Sort by composite score descending.
         scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-
-        let total = scored.len() as u32;
 
         let entries: Vec<EntrySummary> = scored
             .into_iter()
@@ -122,25 +119,30 @@ impl SearchEngine {
 /// safe punctuation (hyphens inside words, apostrophes). Everything else is
 /// dropped.  Returns `None` if the sanitized result is empty.
 fn normalize_query_tokens(raw: &str) -> Vec<String> {
-    raw.split_whitespace()
-        .filter_map(|token| {
-            let cleaned: String = token
-                .chars()
-                .filter(|c| c.is_alphanumeric() || *c == '\'' || *c == '-')
-                .collect();
+    let mut tokens = Vec::new();
+    let mut current = String::new();
 
-            if cleaned.is_empty() {
-                return None;
+    for ch in raw.chars() {
+        if ch.is_alphanumeric() || ch == '\'' || ch == '-' {
+            current.push(ch);
+        } else if !current.is_empty() {
+            let upper = current.to_uppercase();
+            if upper != "OR" && upper != "AND" && upper != "NOT" {
+                tokens.push(std::mem::take(&mut current));
+            } else {
+                current.clear();
             }
+        }
+    }
 
-            let upper = cleaned.to_uppercase();
-            if upper == "OR" || upper == "AND" || upper == "NOT" {
-                return None;
-            }
+    if !current.is_empty() {
+        let upper = current.to_uppercase();
+        if upper != "OR" && upper != "AND" && upper != "NOT" {
+            tokens.push(current);
+        }
+    }
 
-            Some(cleaned)
-        })
-        .collect()
+    tokens
 }
 
 fn normalized_query_text(raw: &str) -> Option<String> {
@@ -205,12 +207,13 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<EntrySummary> {
     })
 }
 
-/// Fetch up to 500 candidates using FTS5 MATCH. May return a rusqlite::Error
+/// Fetch candidates using FTS5 MATCH. May return a rusqlite::Error
 /// if the FTS5 query is syntactically invalid (caller should fall back).
 fn fetch_fts_candidates(
     conn: &Connection,
     query: &str,
     content_class: Option<ContentClass>,
+    limit: u32,
 ) -> Result<Vec<EntrySummary>> {
     let fts_expr = match sanitize_fts5_query(query) {
         Some(expr) => expr,
@@ -224,10 +227,11 @@ fn fetch_fts_candidates(
                        FROM entries e \
                        JOIN search_idx s ON e.id = s.rowid \
                        WHERE search_idx MATCH ? \
-                       LIMIT 500";
+                       ORDER BY e.last_seen_at DESC, e.id DESC \
+                       LIMIT ?";
             let mut stmt = conn.prepare(sql)?;
             let rows = stmt
-                .query_map([&fts_expr], row_to_summary)?
+                .query_map((fts_expr.as_str(), limit), row_to_summary)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             rows
         }
@@ -238,10 +242,11 @@ fn fetch_fts_candidates(
                        JOIN search_idx s ON e.id = s.rowid \
                        WHERE search_idx MATCH ? \
                          AND e.content_class = ? \
-                       LIMIT 500";
+                       ORDER BY e.last_seen_at DESC, e.id DESC \
+                       LIMIT ?";
             let mut stmt = conn.prepare(sql)?;
             let rows = stmt
-                .query_map([fts_expr.as_str(), class.as_str()], row_to_summary)?
+                .query_map((fts_expr.as_str(), class.as_str(), limit), row_to_summary)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             rows
         }
@@ -256,6 +261,7 @@ fn fetch_like_candidates(
     conn: &Connection,
     query: &str,
     content_class: Option<ContentClass>,
+    limit: u32,
 ) -> Result<Vec<EntrySummary>> {
     // Build the LIKE pattern. We use `?` binding — never interpolate user text.
     let pattern = format!("%{}%", query.replace('%', "\\%").replace('_', "\\_"));
@@ -266,10 +272,12 @@ fn fetch_like_candidates(
                               content_class, preview_text, source_app \
                        FROM entries \
                        WHERE preview_text LIKE ? ESCAPE '\\' \
-                       LIMIT 500";
+                          OR source_app LIKE ? ESCAPE '\\' \
+                       ORDER BY last_seen_at DESC, id DESC \
+                       LIMIT ?";
             let mut stmt = conn.prepare(sql)?;
             let rows = stmt
-                .query_map([&pattern], row_to_summary)?
+                .query_map((pattern.as_str(), pattern.as_str(), limit), row_to_summary)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             rows
         }
@@ -277,12 +285,17 @@ fn fetch_like_candidates(
             let sql = "SELECT id, created_at, last_seen_at, pinned, ephemeral, \
                               content_class, preview_text, source_app \
                        FROM entries \
-                       WHERE preview_text LIKE ? ESCAPE '\\' \
+                       WHERE (preview_text LIKE ? ESCAPE '\\' \
+                          OR source_app LIKE ? ESCAPE '\\') \
                          AND content_class = ? \
-                       LIMIT 500";
+                       ORDER BY last_seen_at DESC, id DESC \
+                       LIMIT ?";
             let mut stmt = conn.prepare(sql)?;
             let rows = stmt
-                .query_map([pattern.as_str(), class.as_str()], row_to_summary)?
+                .query_map(
+                    (pattern.as_str(), pattern.as_str(), class.as_str(), limit),
+                    row_to_summary,
+                )?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             rows
         }
@@ -291,21 +304,104 @@ fn fetch_like_candidates(
     Ok(rows)
 }
 
+fn count_fts_candidates(
+    conn: &Connection,
+    query: &str,
+    content_class: Option<ContentClass>,
+) -> Result<u32> {
+    let fts_expr = match sanitize_fts5_query(query) {
+        Some(expr) => expr,
+        None => return Ok(0),
+    };
+
+    let total = match content_class {
+        None => {
+            let sql = "SELECT COUNT(*) \
+                       FROM entries e \
+                       JOIN search_idx s ON e.id = s.rowid \
+                       WHERE search_idx MATCH ?";
+            let mut stmt = conn.prepare(sql)?;
+            stmt.query_row([fts_expr.as_str()], |row| row.get(0))?
+        }
+        Some(class) => {
+            let sql = "SELECT COUNT(*) \
+                       FROM entries e \
+                       JOIN search_idx s ON e.id = s.rowid \
+                       WHERE search_idx MATCH ? \
+                         AND e.content_class = ?";
+            let mut stmt = conn.prepare(sql)?;
+            stmt.query_row((fts_expr.as_str(), class.as_str()), |row| row.get(0))?
+        }
+    };
+
+    Ok(total)
+}
+
+fn count_like_candidates(
+    conn: &Connection,
+    query: &str,
+    content_class: Option<ContentClass>,
+) -> Result<u32> {
+    let pattern = format!("%{}%", query.replace('%', "\\%").replace('_', "\\_"));
+
+    let total = match content_class {
+        None => {
+            let sql = "SELECT COUNT(*) \
+                       FROM entries \
+                       WHERE preview_text LIKE ? ESCAPE '\\' \
+                          OR source_app LIKE ? ESCAPE '\\'";
+            let mut stmt = conn.prepare(sql)?;
+            stmt.query_row((pattern.as_str(), pattern.as_str()), |row| row.get(0))?
+        }
+        Some(class) => {
+            let sql = "SELECT COUNT(*) \
+                       FROM entries \
+                       WHERE (preview_text LIKE ? ESCAPE '\\' \
+                          OR source_app LIKE ? ESCAPE '\\') \
+                         AND content_class = ?";
+            let mut stmt = conn.prepare(sql)?;
+            stmt.query_row(
+                (pattern.as_str(), pattern.as_str(), class.as_str()),
+                |row| row.get(0),
+            )?
+        }
+    };
+
+    Ok(total)
+}
+
+fn count_all_candidates(conn: &Connection, content_class: Option<ContentClass>) -> Result<u32> {
+    let total = match content_class {
+        None => {
+            let mut stmt = conn.prepare("SELECT COUNT(*) FROM entries")?;
+            stmt.query_row([], |row| row.get(0))?
+        }
+        Some(class) => {
+            let mut stmt = conn.prepare("SELECT COUNT(*) FROM entries WHERE content_class = ?")?;
+            stmt.query_row([class.as_str()], |row| row.get(0))?
+        }
+    };
+
+    Ok(total)
+}
+
 /// Fetch recent entries without text filtering (used when query is empty).
-fn fetch_all_candidates(
+fn fetch_all_candidates_page(
     conn: &Connection,
     content_class: Option<ContentClass>,
+    offset: u32,
+    limit: u32,
 ) -> Result<Vec<EntrySummary>> {
     let rows = match content_class {
         None => {
             let sql = "SELECT id, created_at, last_seen_at, pinned, ephemeral, \
                               content_class, preview_text, source_app \
                        FROM entries \
-                       ORDER BY last_seen_at DESC \
-                       LIMIT 500";
+                       ORDER BY pinned DESC, last_seen_at DESC, id DESC \
+                       LIMIT ? OFFSET ?";
             let mut stmt = conn.prepare(sql)?;
             let rows = stmt
-                .query_map([], row_to_summary)?
+                .query_map((limit, offset), row_to_summary)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             rows
         }
@@ -314,11 +410,11 @@ fn fetch_all_candidates(
                               content_class, preview_text, source_app \
                        FROM entries \
                        WHERE content_class = ? \
-                       ORDER BY last_seen_at DESC \
-                       LIMIT 500";
+                       ORDER BY pinned DESC, last_seen_at DESC, id DESC \
+                       LIMIT ? OFFSET ?";
             let mut stmt = conn.prepare(sql)?;
             let rows = stmt
-                .query_map([class.as_str()], row_to_summary)?
+                .query_map((class.as_str(), limit, offset), row_to_summary)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             rows
         }
@@ -355,8 +451,7 @@ fn composite_score(
 }
 
 /// Score candidates using nucleo-matcher (Pattern API) and build composite
-/// scores.  Entries that receive no nucleo score are dropped (they don't
-/// fuzzy-match the query at all).
+/// scores.
 fn score_candidates(
     candidates: Vec<EntrySummary>,
     query: &str,
@@ -379,8 +474,8 @@ fn score_candidates(
     let mut max_score: u32 = 1; // avoid division by zero
 
     for entry in &candidates {
-        let haystack_str = entry.preview_text.as_deref().unwrap_or("");
-        let haystack = Utf32Str::new(haystack_str, &mut buf);
+        let haystack_text = combined_haystack(entry);
+        let haystack = Utf32Str::new(&haystack_text, &mut buf);
         let mut indices = Vec::new();
         let score = pattern.indices(haystack, &mut matcher, &mut indices);
         if let Some(s) = score {
@@ -397,8 +492,8 @@ fn score_candidates(
     candidates
         .into_iter()
         .zip(raw_scores)
-        .filter_map(|(mut entry, raw_data)| {
-            let (raw, char_indices) = raw_data?; // drop entries with no nucleo match
+        .map(|(mut entry, raw_data)| {
+            let (raw, char_indices) = raw_data.unwrap_or_default();
             let normalized = raw as f64 / max_score as f64;
             let composite = composite_score(normalized, entry.last_seen_at, entry.pinned, now_ms);
 
@@ -440,9 +535,18 @@ fn score_candidates(
             }
 
             entry.match_ranges = ranges;
-            Some((entry, composite))
+            (entry, composite)
         })
         .collect()
+}
+
+fn combined_haystack(entry: &EntrySummary) -> String {
+    match (&entry.preview_text, &entry.source_app) {
+        (Some(preview), Some(source_app)) => format!("{preview} {source_app}"),
+        (Some(preview), None) => preview.clone(),
+        (None, Some(source_app)) => source_app.clone(),
+        (None, None) => String::new(),
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -297,16 +297,61 @@ pub struct Config {
 impl Config {
     /// Read TOML from `path` and deserialize, filling missing fields from defaults.
     pub fn load(path: impl AsRef<std::path::Path>) -> Result<Config> {
-        let raw = std::fs::read_to_string(path.as_ref())
-            .map_err(|e| NixClipError::Config(format!("cannot read config file: {e}")))?;
+        let path = path.as_ref();
+        let raw = std::fs::read_to_string(path).map_err(NixClipError::Io)?;
         let cfg: Config =
             toml::from_str(&raw).map_err(|e| NixClipError::Config(format!("invalid TOML: {e}")))?;
+        cfg.validate()?;
         Ok(cfg)
     }
 
-    /// Try to load from the default config path; fall back to `Config::default()` on any error.
-    pub fn load_or_default() -> Config {
-        Self::load(Self::config_path()).unwrap_or_default()
+    /// Validate semantic config invariants that TOML deserialization alone does not cover.
+    pub fn validate(&self) -> Result<()> {
+        for (idx, pattern) in self.ignore.patterns.iter().enumerate() {
+            regex::Regex::new(pattern).map_err(|e| {
+                NixClipError::Config(format!(
+                    "invalid ignore.patterns[{idx}] regex {pattern:?}: {e}"
+                ))
+            })?;
+        }
+
+        Ok(())
+    }
+
+    /// Try to load from the default config path; fall back to defaults only when the file is absent.
+    pub fn load_or_default() -> Result<Config> {
+        match Self::existing_config_path() {
+            Some(path) => Self::load(path),
+            None => Ok(Config::default()),
+        }
+    }
+
+    /// Candidate config files in lookup order.
+    ///
+    /// Per-user config wins, then system-level config directories from
+    /// `XDG_CONFIG_DIRS` (defaulting to `/etc/xdg`).
+    pub fn config_search_paths() -> Vec<PathBuf> {
+        let mut paths = vec![Self::config_path()];
+
+        let config_dirs = std::env::var_os("XDG_CONFIG_DIRS")
+            .map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
+            .unwrap_or_else(|| vec![PathBuf::from("/etc/xdg")]);
+
+        for dir in config_dirs {
+            let candidate = dir.join("nixclip").join("config.toml");
+            if !paths.iter().any(|path| path == &candidate) {
+                paths.push(candidate);
+            }
+        }
+
+        paths
+    }
+
+    /// First existing config file in lookup order, if any.
+    pub fn existing_config_path() -> Option<PathBuf> {
+        Self::config_search_paths()
+            .into_iter()
+            .find(|path| path.exists())
     }
 
     /// Serialize to TOML and write atomically (write temp file, then rename).
@@ -339,7 +384,8 @@ impl Config {
     /// `$XDG_CONFIG_HOME/nixclip/` (falls back to `~/.config/nixclip/`).
     pub fn config_dir() -> PathBuf {
         dirs::config_dir()
-            .unwrap_or_else(|| PathBuf::from("~/.config"))
+            .or_else(|| dirs::home_dir().map(|home| home.join(".config")))
+            .unwrap_or_else(|| PathBuf::from(".config"))
             .join("nixclip")
     }
 
@@ -351,7 +397,8 @@ impl Config {
     /// `$XDG_DATA_HOME/nixclip/` (falls back to `~/.local/share/nixclip/`).
     pub fn data_dir() -> PathBuf {
         dirs::data_dir()
-            .unwrap_or_else(|| PathBuf::from("~/.local/share"))
+            .or_else(|| dirs::home_dir().map(|home| home.join(".local/share")))
+            .unwrap_or_else(|| PathBuf::from(".local/share"))
             .join("nixclip")
     }
 

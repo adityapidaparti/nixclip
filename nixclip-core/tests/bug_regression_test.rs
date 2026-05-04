@@ -23,14 +23,11 @@
 ///   - Pruning under tokio async runtime (the actual bug surface)
 ///   - IPC end-to-end over Unix domain sockets
 ///   - Privacy filter two-phase check (pre_content vs content_patterns)
-
 use nixclip_core::config::{Config, GeneralConfig, IgnoreConfig, Retention};
 use nixclip_core::pipeline::privacy::{FilterResult, PrivacyFilter};
 use nixclip_core::pipeline::ContentProcessor;
 use nixclip_core::storage::ClipStore;
-use nixclip_core::{
-    ContentClass, EntryMetadata, MimePayload, NewEntry, Query,
-};
+use nixclip_core::{ContentClass, EntryMetadata, MimePayload, NewEntry, Query};
 
 // ===========================================================================
 // Helpers
@@ -304,7 +301,9 @@ async fn daemon_subsystems_work_without_clipboard_backend() {
         retention: Retention::Unlimited,
         ephemeral_ttl_hours: 24,
     };
-    let stats = store.prune(&config).expect("prune without clipboard backend");
+    let stats = store
+        .prune(&config)
+        .expect("prune without clipboard backend");
     assert_eq!(stats.entries_deleted, 1);
 
     // Queries should still work.
@@ -384,7 +383,10 @@ fn prune_ephemeral_does_not_touch_normal_entries() {
     std::thread::sleep(std::time::Duration::from_millis(5));
 
     let stats = store.prune_ephemeral(0).expect("prune_ephemeral");
-    assert_eq!(stats.entries_deleted, 1, "only the ephemeral entry should go");
+    assert_eq!(
+        stats.entries_deleted, 1,
+        "only the ephemeral entry should go"
+    );
 
     let store_stats = store.stats().expect("stats");
     assert_eq!(store_stats.entry_count, 1, "normal entry should survive");
@@ -527,8 +529,7 @@ async fn combined_prune_and_ephemeral_prune() {
 fn two_phase_privacy_phase1_rejects_ignored_app() {
     let filter = PrivacyFilter::new(&IgnoreConfig::default()).expect("filter");
 
-    let result =
-        filter.check_pre_content(Some("org.keepassxc.KeePassXC"), &mimes(&["text/plain"]));
+    let result = filter.check_pre_content(Some("org.keepassxc.KeePassXC"), &mimes(&["text/plain"]));
     assert_eq!(result, FilterResult::Reject);
 }
 
@@ -537,10 +538,8 @@ fn two_phase_privacy_phase1_rejects_ignored_app() {
 fn two_phase_privacy_phase1_rejects_sensitive_mime() {
     let filter = PrivacyFilter::new(&IgnoreConfig::default()).expect("filter");
 
-    let result = filter.check_pre_content(
-        None,
-        &mimes(&["text/plain", "x-kde-passwordManagerHint"]),
-    );
+    let result =
+        filter.check_pre_content(None, &mimes(&["text/plain", "x-kde-passwordManagerHint"]));
     assert_eq!(result, FilterResult::Reject);
 }
 
@@ -549,8 +548,7 @@ fn two_phase_privacy_phase1_rejects_sensitive_mime() {
 fn two_phase_privacy_phase1_allows_normal() {
     let filter = PrivacyFilter::new(&IgnoreConfig::default()).expect("filter");
 
-    let result =
-        filter.check_pre_content(Some("org.mozilla.firefox"), &mimes(&["text/plain"]));
+    let result = filter.check_pre_content(Some("org.mozilla.firefox"), &mimes(&["text/plain"]));
     assert_eq!(result, FilterResult::Allow);
 }
 
@@ -607,8 +605,7 @@ fn two_phase_privacy_full_flow_reject_shortcircuits() {
     let offered_mimes = mimes(&["text/plain"]);
 
     // Phase 1: rejected by app name.
-    let phase1 =
-        filter.check_pre_content(Some("org.keepassxc.KeePassXC"), &offered_mimes);
+    let phase1 = filter.check_pre_content(Some("org.keepassxc.KeePassXC"), &offered_mimes);
     assert_eq!(phase1, FilterResult::Reject);
 
     // Phase 2 would never be called because the event is already rejected.
@@ -679,19 +676,15 @@ async fn ipc_full_query_response_cycle_over_duplex() {
         .expect("server send response");
 
     // Client receives response.
-    let server_reply: ServerMessage =
-        recv_message(&mut client).await.expect("client recv response");
+    let server_reply: ServerMessage = recv_message(&mut client)
+        .await
+        .expect("client recv response");
     match server_reply {
-        ServerMessage::QueryResult {
-            entries, total, ..
-        } => {
+        ServerMessage::QueryResult { entries, total, .. } => {
             assert_eq!(total, 1);
             assert_eq!(entries.len(), 1);
             assert_eq!(entries[0].id, 42);
-            assert_eq!(
-                entries[0].preview_text.as_deref(),
-                Some("rust programming")
-            );
+            assert_eq!(entries[0].preview_text.as_deref(), Some("rust programming"));
         }
         other => panic!("expected QueryResult, got {other:?}"),
     }
@@ -711,7 +704,9 @@ async fn ipc_subscribe_then_receive_new_entry() {
         .expect("client subscribe");
 
     // Server receives subscribe.
-    let msg: ClientMessage = recv_message(&mut server).await.expect("server recv subscribe");
+    let msg: ClientMessage = recv_message(&mut server)
+        .await
+        .expect("server recv subscribe");
     assert!(matches!(msg, ClientMessage::Subscribe { .. }));
 
     // Server pushes a new entry notification.
@@ -734,8 +729,9 @@ async fn ipc_subscribe_then_receive_new_entry() {
         .expect("server push new entry");
 
     // Client receives the notification.
-    let received: ServerMessage =
-        recv_message(&mut client).await.expect("client recv notification");
+    let received: ServerMessage = recv_message(&mut client)
+        .await
+        .expect("client recv notification");
     match received {
         ServerMessage::NewEntry { entry, .. } => {
             assert_eq!(entry.id, 1);
@@ -747,10 +743,7 @@ async fn ipc_subscribe_then_receive_new_entry() {
 
 #[tokio::test]
 async fn ipc_set_config_round_trip() {
-    use nixclip_core::ipc::{
-        recv_message, send_message, ClientMessage,
-        ServerMessage,
-    };
+    use nixclip_core::ipc::{recv_message, send_message, ClientMessage, ServerMessage};
 
     let (mut client, mut server) = tokio::io::duplex(8192);
 
@@ -869,9 +862,8 @@ fn content_processor_to_new_entry_pipeline() {
         data: b"Hello, world!".to_vec(),
     };
 
-    let processed =
-        ContentProcessor::process(vec![payload], Some("org.gnome.gedit".to_string()))
-            .expect("process");
+    let processed = ContentProcessor::process(vec![payload], Some("org.gnome.gedit".to_string()))
+        .expect("process");
 
     assert_eq!(processed.content_class, ContentClass::Text);
     assert_eq!(processed.preview_text.as_deref(), Some("Hello, world!"));

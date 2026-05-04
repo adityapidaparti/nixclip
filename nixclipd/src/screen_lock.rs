@@ -1,10 +1,11 @@
 //! Screen lock detection via D-Bus.
 //!
 //! Listens for the `org.gnome.ScreenSaver.ActiveChanged` signal and pauses
-//! clipboard capture while the screen is locked.  If the D-Bus connection
-//! fails, this module returns without error — it is non-fatal.
+//! clipboard capture while the screen is locked. If the D-Bus connection
+//! fails or the stream ends, this module logs and retries in the background.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use tracing::{info, warn};
 
@@ -16,18 +17,28 @@ use crate::AppState;
 pub async fn run(state: Arc<AppState>) -> Result<()> {
     info!("starting screen lock monitor");
 
-    match monitor(state).await {
-        Ok(()) => Ok(()),
-        Err(e) => {
-            warn!(
-                error = %e,
-                "screen lock monitoring failed (non-fatal); \
-                 clipboard capture will not pause during screen lock"
-            );
-            Ok(())
+    loop {
+        match monitor(state.clone()).await {
+            Ok(()) => {
+                warn!(
+                    retry_delay_secs = SCREEN_LOCK_RETRY_DELAY.as_secs(),
+                    "screen lock monitor stopped; retrying"
+                );
+            }
+            Err(e) => {
+                warn!(
+                    error = %e,
+                    retry_delay_secs = SCREEN_LOCK_RETRY_DELAY.as_secs(),
+                    "screen lock monitoring failed (non-fatal); retrying"
+                );
+            }
         }
+
+        tokio::time::sleep(SCREEN_LOCK_RETRY_DELAY).await;
     }
 }
+
+const SCREEN_LOCK_RETRY_DELAY: Duration = Duration::from_secs(15);
 
 #[cfg(target_os = "linux")]
 async fn monitor(
@@ -47,7 +58,7 @@ async fn monitor(
             "/org/freedesktop/DBus",
             Some("org.freedesktop.DBus"),
             "AddMatch",
-            &("type='signal',interface='org.gnome.ScreenSaver',member='ActiveChanged'",),
+            &("type='signal',sender='org.gnome.ScreenSaver',path='/org/gnome/ScreenSaver',interface='org.gnome.ScreenSaver',member='ActiveChanged'",),
         )
         .await?;
 
@@ -93,8 +104,11 @@ async fn monitor(
         let is_active_changed = header
             .member()
             .is_some_and(|m| m.as_str() == "ActiveChanged");
+        let is_screen_saver_path = header
+            .path()
+            .is_some_and(|p| p.as_str() == "/org/gnome/ScreenSaver");
 
-        if is_signal && is_screen_saver && is_active_changed {
+        if is_signal && is_screen_saver && is_active_changed && is_screen_saver_path {
             if let Ok(active) = msg.body().deserialize::<bool>() {
                 let was_locked = state.is_locked.swap(active, Ordering::Relaxed);
                 if active && !was_locked {

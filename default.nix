@@ -11,6 +11,7 @@ pkgs.rustPlatform.buildRustPackage {
   src = pkgs.lib.cleanSource ./.;
 
   cargoLock.lockFile = ./Cargo.lock;
+  cargoBuildFlags = [ "--workspace" "--bins" ];
 
   nativeBuildInputs = with pkgs; [
     pkg-config
@@ -40,16 +41,16 @@ pkgs.rustPlatform.buildRustPackage {
     done
   '';
 
-  postInstall = ''
+  installPhase = ''
+    runHook preInstall
+    mkdir -p "$out/bin"
     for bin in nixclipd nixclip nixclip-ui; do
-      if [ ! -f "$out/bin/$bin" ]; then
-        echo "Warning: expected binary '$bin' not found in \$out/bin"
-      fi
+      install -Dm755 "target/release/$bin" "$out/bin/$bin"
     done
-
     install -Dm644 \
       ${./nix/desktop-entry.desktop} \
       "$out/share/applications/com.nixclip.NixClip.desktop"
+    runHook postInstall
   '';
 
   meta = with pkgs.lib; {

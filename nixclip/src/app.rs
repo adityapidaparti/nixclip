@@ -28,7 +28,7 @@ pub(crate) struct UiHandle {
 
 impl UiHandle {
     fn new(app: &adw::Application) -> Self {
-        let config = Config::load_or_default();
+        let config = load_config_or_warn();
         let socket_path = Config::socket_path();
 
         let ipc = Rc::new(UiIpcClient::new(&socket_path));
@@ -204,7 +204,7 @@ fn setup_actions(
                     Ok(config) => config,
                     Err(error) => {
                         tracing::warn!(error = %error, "failed to fetch daemon config");
-                        Config::load_or_default()
+                        load_config_or_warn()
                     }
                 };
 
@@ -271,6 +271,13 @@ fn setup_actions(
             load_entries(&p, &i, &q);
         }
     });
+}
+
+fn load_config_or_warn() -> Config {
+    Config::load_or_default().unwrap_or_else(|error| {
+        tracing::warn!(error = %error, "failed to load config; using defaults");
+        Config::default()
+    })
 }
 
 fn add_action(

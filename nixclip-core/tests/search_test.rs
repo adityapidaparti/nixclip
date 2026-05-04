@@ -339,6 +339,20 @@ fn search_no_class_filter_returns_all_classes() {
     assert!(classes.contains(&ContentClass::Url));
 }
 
+#[test]
+fn search_url_query_preserves_separator_boundaries() {
+    let (store, engine, _dir) = setup();
+    let id = insert_url(&store, 1, "https://example.com/path");
+    insert_text(&store, 2, "plain example entry");
+
+    let result = engine.search("example.com", None, 0, 10).expect("search");
+    let ids: Vec<_> = result.entries.iter().map(|entry| entry.id).collect();
+    assert!(
+        ids.contains(&id),
+        "query with '.' should still match URL/domain tokens"
+    );
+}
+
 // ===========================================================================
 // Source app field is preserved
 // ===========================================================================
@@ -373,4 +387,33 @@ fn search_results_include_source_app() {
         result.entries[0].source_app.as_deref(),
         Some("org.test.Editor")
     );
+}
+
+#[test]
+fn search_matches_source_app_text() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("test.db");
+    let blob_dir = dir.path().join("blobs");
+    let store = ClipStore::open(&db_path, &blob_dir).expect("open");
+    let engine = SearchEngine::new(db_path);
+
+    let mut hash = [0u8; 32];
+    hash[0] = 100;
+    let entry = NewEntry {
+        content_class: ContentClass::Text,
+        preview_text: Some("clipboard row".to_string()),
+        canonical_hash: hash,
+        representations: vec![MimePayload {
+            mime: "text/plain".to_string(),
+            data: b"clipboard row".to_vec(),
+        }],
+        source_app: Some("org.test.Editor".to_string()),
+        ephemeral: false,
+        metadata: Default::default(),
+    };
+    let id = store.insert(entry).expect("insert").expect("id");
+
+    let result = engine.search("Editor", None, 0, 10).expect("search");
+    let ids: Vec<_> = result.entries.iter().map(|entry| entry.id).collect();
+    assert!(ids.contains(&id), "source_app text should be searchable");
 }

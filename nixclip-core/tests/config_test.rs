@@ -409,6 +409,26 @@ fn load_invalid_toml_returns_error() {
 }
 
 #[test]
+fn load_invalid_ignore_regex_returns_error() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("bad-regex.toml");
+    std::fs::write(
+        &path,
+        br#"
+[ignore]
+patterns = ["("]
+"#,
+    )
+    .expect("write bad regex config");
+
+    let error = Config::load(&path).expect_err("invalid regex must fail load");
+    assert!(
+        error.to_string().contains("invalid ignore.patterns"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
 fn load_empty_file_gives_all_defaults() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("empty.toml");
@@ -430,7 +450,7 @@ fn load_or_default_returns_default_on_missing_file() {
     // We can't easily redirect the default path in tests, so we test the
     // fallback indirectly: calling load() on a missing path returns Err, while
     // the public API load_or_default() should never panic.
-    let cfg = Config::load_or_default();
+    let cfg = Config::load_or_default().expect("missing default path should fall back");
     // Must produce a usable Config regardless.
     assert!(cfg.general.max_entries > 0);
 }

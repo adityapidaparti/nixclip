@@ -19,7 +19,10 @@
         # Common arguments shared by all crane derivations.
         commonArgs = {
           inherit src;
+          pname = "nixclip";
+          version = "0.1.0";
           strictDeps = true;
+          cargoExtraArgs = "--workspace";
 
           nativeBuildInputs = with pkgs; [
             pkg-config
@@ -73,11 +76,8 @@
           inherit cargoArtifacts;
 
           postInstall = ''
-            # Verify that all expected binaries were installed.
             for bin in nixclipd nixclip nixclip-ui; do
-              if [ ! -f "$out/bin/$bin" ]; then
-                echo "Warning: expected binary '$bin' not found in \$out/bin"
-              fi
+              test -x "$out/bin/$bin"
             done
 
             # Install the freedesktop desktop entry.
@@ -94,6 +94,61 @@
             mainProgram = "nixclip";
           };
         });
+
+        # Evaluate the NixOS module in a real NixOS module graph. This uses a
+        # tiny package stand-in so the module wiring check does not duplicate
+        # the full Rust package build.
+        moduleSmokePackage = pkgs.runCommand "nixclip-module-smoke-package" { } ''
+          mkdir -p "$out/bin"
+          touch "$out/bin/nixclipd" "$out/bin/nixclip-ui"
+          chmod +x "$out/bin/nixclipd" "$out/bin/nixclip-ui"
+        '';
+
+        nixosModuleSmoke = nixpkgs.lib.nixosSystem {
+          inherit system;
+          modules = [
+            ./nix/module.nix
+            ({ ... }: {
+              system.stateVersion = "25.11";
+              services.nixclip = {
+                enable = true;
+                package = moduleSmokePackage;
+                settings = {
+                  general.max_entries = 250;
+                  keybind = {
+                    open_formatted = "Super+V";
+                    open_plain = "Super+Shift+V";
+                  };
+                };
+              };
+            })
+          ];
+        };
+
+        nixosModuleDconf =
+          (builtins.elemAt
+            nixosModuleSmoke.config.programs.dconf.profiles.user.databases
+            0).settings;
+        nixosModuleService =
+          nixosModuleSmoke.config.systemd.user.services.nixclipd.serviceConfig;
+        nixosModuleProbe = pkgs.writeText "nixclip-nixos-module-smoke.json"
+          (builtins.toJSON {
+            execStart = nixosModuleService.ExecStart;
+            environment = nixosModuleService.Environment;
+            passEnvironment = nixosModuleService.PassEnvironment;
+            formattedBinding =
+              nixosModuleDconf."org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/nixclip0".binding;
+            formattedCommand =
+              nixosModuleDconf."org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/nixclip0".command;
+            plainBinding =
+              nixosModuleDconf."org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/nixclip1".binding;
+            plainCommand =
+              nixosModuleDconf."org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/nixclip1".command;
+            messageTray =
+              nixosModuleDconf."org/gnome/shell/keybindings".toggle-message-tray;
+            customKeybindings =
+              nixosModuleDconf."org/gnome/settings-daemon/plugins/media-keys".custom-keybindings;
+          });
       in
       {
         packages = {
@@ -112,7 +167,86 @@
           });
 
           # Formatting check.
-          nixclip-fmt = craneLib.cargoFmt { inherit src; };
+          nixclip-fmt = craneLib.cargoFmt {
+            inherit src;
+            pname = "nixclip";
+            version = "0.1.0";
+          };
+
+          nixclip-nixos-module = pkgs.runCommand "nixclip-nixos-module-smoke"
+            {
+              nativeBuildInputs = with pkgs; [
+                gnugrep
+                jq
+              ];
+            } ''
+            jq -e '
+              .execStart | test("/bin/nixclipd$")
+            ' ${nixosModuleProbe} >/dev/null
+
+            jq -e '
+              .formattedBinding == "<Super>v" and
+              (.formattedCommand | test("/bin/nixclip-ui$")) and
+              .plainBinding == "<Super><Shift>v" and
+              (.plainCommand | test("/bin/nixclip-ui --plain$")) and
+              (.environment | index("NIXCLIP_DISABLE_PORTAL_HOTKEYS=1")) and
+              (.passEnvironment | index("WAYLAND_DISPLAY")) and
+              (.passEnvironment | index("XDG_SESSION_TYPE")) and
+              (.messageTray == ["<Super>m"]) and
+              (.customKeybindings == [
+                "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/nixclip0/",
+                "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/nixclip1/"
+              ])
+            ' ${nixosModuleProbe} >/dev/null
+
+            grep -F 'max_entries = 250' \
+              ${nixosModuleSmoke.config.environment.etc."xdg/nixclip/config.toml".source}
+            grep -F 'open_formatted = "Super+V"' \
+              ${nixosModuleSmoke.config.environment.etc."xdg/nixclip/config.toml".source}
+
+            mkdir -p "$out"
+            touch "$out/passed"
+          '';
+
+          # Headless Wayland smoke test. This starts a compositor, launches the
+          # packaged daemon, writes to the clipboard, verifies IPC/search/restore,
+          # sends Super+V/Super+Shift+V through a virtual keyboard, and verifies
+          # that the GTK UI commands behind those shortcuts launch.
+          nixclip-e2e-smoke = pkgs.runCommand "nixclip-e2e-smoke"
+            {
+              nativeBuildInputs = with pkgs; [
+                bash
+                coreutils
+                dbus
+                gnugrep
+                gnused
+                jq
+                sway
+                wayland-utils
+                wl-clipboard
+                wtype
+              ];
+            } ''
+            export PATH=${pkgs.lib.makeBinPath [
+              nixclip
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.dbus
+              pkgs.gnugrep
+              pkgs.gnused
+              pkgs.jq
+              pkgs.sway
+              pkgs.wayland-utils
+              pkgs.wl-clipboard
+              pkgs.wtype
+            ]}:$PATH
+            export DBUS_SESSION_BUS_CONFIG_FILE=${pkgs.dbus}/share/dbus-1/session.conf
+
+            bash ${./nix/e2e-smoke.sh}
+
+            mkdir -p "$out"
+            touch "$out/passed"
+          '';
         };
 
         devShells.default = craneLib.devShell {

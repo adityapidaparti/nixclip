@@ -26,16 +26,12 @@ use crate::AppState;
 pub async fn run(state: Arc<AppState>) -> Result<()> {
     let socket_path = Config::socket_path();
 
-    // Remove a stale socket file from a previous run.
-    if socket_path.exists() {
-        info!(path = %socket_path.display(), "removing stale socket");
-        std::fs::remove_file(&socket_path).map_err(NixClipError::Io)?;
-    }
-
     // Ensure the parent directory exists.
     if let Some(parent) = socket_path.parent() {
         std::fs::create_dir_all(parent).map_err(NixClipError::Io)?;
     }
+
+    ensure_socket_available(&socket_path).await?;
 
     let listener = UnixListener::bind(&socket_path)?;
 
@@ -66,6 +62,36 @@ pub async fn run(state: Arc<AppState>) -> Result<()> {
                 error!(error = %e, "failed to accept IPC connection");
             }
         }
+    }
+}
+
+async fn ensure_socket_available(socket_path: &std::path::Path) -> Result<()> {
+    if !socket_path.exists() {
+        return Ok(());
+    }
+
+    match UnixStream::connect(socket_path).await {
+        Ok(_) => Err(NixClipError::Ipc(format!(
+            "socket {} is already accepting connections; another nixclipd instance may be running",
+            socket_path.display()
+        ))),
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound
+            ) =>
+        {
+            info!(
+                path = %socket_path.display(),
+                error = %error,
+                "removing stale socket"
+            );
+            std::fs::remove_file(socket_path).map_err(NixClipError::Io)
+        }
+        Err(error) => Err(NixClipError::Ipc(format!(
+            "failed to probe existing socket {}: {error}",
+            socket_path.display()
+        ))),
     }
 }
 
@@ -111,7 +137,7 @@ fn verify_peer_credentials(stream: &UnixStream) -> Result<()> {
             )));
         }
 
-        return Ok(());
+        Ok(())
     }
 
     // On macOS / other Unix, use LOCAL_PEERCRED or skip (non-fatal for dev).
@@ -126,6 +152,45 @@ fn verify_peer_credentials(stream: &UnixStream) -> Result<()> {
 #[cfg(not(unix))]
 fn verify_peer_credentials(_stream: &UnixStream) -> Result<()> {
     Ok(())
+}
+
+async fn with_store<T, F>(state: Arc<AppState>, op: F) -> std::result::Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce(&nixclip_core::storage::ClipStore) -> Result<T> + Send + 'static,
+{
+    tokio::task::spawn_blocking(move || {
+        let store = state
+            .store
+            .lock()
+            .map_err(|e| format!("store lock poisoned: {e}"))?;
+        op(&store).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| format!("store task failed: {e}"))?
+}
+
+async fn search_entries(
+    state: Arc<AppState>,
+    text: String,
+    content_class: Option<ContentClass>,
+    offset: u32,
+    limit: u32,
+) -> std::result::Result<nixclip_core::QueryResult, String> {
+    let engine = state.search_engine.clone();
+    tokio::task::spawn_blocking(move || {
+        engine
+            .search(&text, content_class, offset, limit)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| format!("search task failed: {e}"))?
+}
+
+async fn save_config(config: Config, path: std::path::PathBuf) -> std::result::Result<(), String> {
+    tokio::task::spawn_blocking(move || config.save(&path).map_err(|e| e.to_string()))
+        .await
+        .map_err(|e| format!("config save task failed: {e}"))?
 }
 
 // ---------------------------------------------------------------------------
@@ -168,14 +233,16 @@ async fn handle_client(state: Arc<AppState>, stream: UnixStream) -> Result<()> {
                 offset,
                 limit,
                 ..
-            } => handle_query(&state, text, content_class, offset, limit).await,
-            ClientMessage::Restore { id, mode, .. } => handle_restore(&state, id, mode).await,
-            ClientMessage::Delete { ids, .. } => handle_delete(&state, ids).await,
-            ClientMessage::Pin { id, pinned, .. } => handle_pin(&state, id, pinned).await,
-            ClientMessage::ClearUnpinned { .. } => handle_clear_unpinned(&state).await,
-            ClientMessage::GetConfig { .. } => handle_get_config(&state).await,
-            ClientMessage::SetConfig { patch, .. } => handle_set_config(&state, patch).await,
-            ClientMessage::GetEntry { id, .. } => handle_get_entry(&state, id).await,
+            } => handle_query(state.clone(), text, content_class, offset, limit).await,
+            ClientMessage::Restore { id, mode, .. } => {
+                handle_restore(state.clone(), id, mode).await
+            }
+            ClientMessage::Delete { ids, .. } => handle_delete(state.clone(), ids).await,
+            ClientMessage::Pin { id, pinned, .. } => handle_pin(state.clone(), id, pinned).await,
+            ClientMessage::ClearUnpinned { .. } => handle_clear_unpinned(state.clone()).await,
+            ClientMessage::GetConfig { .. } => handle_get_config(state.clone()).await,
+            ClientMessage::SetConfig { patch, .. } => handle_set_config(state.clone(), patch).await,
+            ClientMessage::GetEntry { id, .. } => handle_get_entry(state.clone(), id).await,
         };
 
         send_message(&mut writer, &response).await?;
@@ -212,7 +279,7 @@ async fn handle_subscribe(state: Arc<AppState>, writer: &mut tokio::net::unix::O
 
 /// Query the clipboard history.
 async fn handle_query(
-    state: &AppState,
+    state: Arc<AppState>,
     text: Option<String>,
     content_class: Option<String>,
     offset: u32,
@@ -239,11 +306,14 @@ async fn handle_query(
     // If the query has a text component, use the search engine first.
     if let Some(ref search_text) = text {
         // Try fuzzy search via SearchEngine.
-        let search_result = {
-            let search_text = search_text.clone();
-            let engine = &state.search_engine;
-            engine.search(&search_text, class_filter, offset, limit)
-        };
+        let search_result = search_entries(
+            state.clone(),
+            search_text.clone(),
+            class_filter,
+            offset,
+            limit,
+        )
+        .await;
 
         match search_result {
             Ok(result) => {
@@ -256,15 +326,7 @@ async fn handle_query(
     }
 
     // Fall back to direct store query.
-    let result = {
-        let store = match state.store.lock() {
-            Ok(s) => s,
-            Err(e) => {
-                return ServerMessage::error(format!("store lock poisoned: {e}"));
-            }
-        };
-        store.query(query)
-    };
+    let result = with_store(state, move |store| store.query(query)).await;
 
     match result {
         Ok(qr) => ServerMessage::query_result(qr.entries, qr.total),
@@ -273,22 +335,14 @@ async fn handle_query(
 }
 
 /// Fetch a single entry by ID.
-async fn handle_get_entry(state: &AppState, id: nixclip_core::EntryId) -> ServerMessage {
-    let result = {
-        let store = match state.store.lock() {
-            Ok(s) => s,
-            Err(e) => {
-                return ServerMessage::error(format!("store lock poisoned: {e}"));
-            }
-        };
-        store.get_entry(id)
-    };
+async fn handle_get_entry(state: Arc<AppState>, id: nixclip_core::EntryId) -> ServerMessage {
+    let result = with_store(state, move |store| store.get_entry(id)).await;
 
     match result {
         Ok(entry) => ServerMessage::entry_detail(Some(entry)),
         Err(e) => {
             // QueryReturnedNoRows means the entry does not exist.
-            let msg = format!("{e}");
+            let msg = e.to_string();
             if msg.contains("Query returned no rows") {
                 ServerMessage::entry_detail(None)
             } else {
@@ -300,20 +354,12 @@ async fn handle_get_entry(state: &AppState, id: nixclip_core::EntryId) -> Server
 
 /// Restore a clipboard entry to the system clipboard.
 async fn handle_restore(
-    state: &AppState,
+    state: Arc<AppState>,
     id: nixclip_core::EntryId,
     mode: RestoreMode,
 ) -> ServerMessage {
     // Load representations from the store.
-    let representations = {
-        let store = match state.store.lock() {
-            Ok(s) => s,
-            Err(e) => {
-                return ServerMessage::restore_err(format!("store lock poisoned: {e}"));
-            }
-        };
-        store.get_representations(id)
-    };
+    let representations = with_store(state, move |store| store.get_representations(id)).await;
 
     let representations = match representations {
         Ok(reps) => reps,
@@ -347,16 +393,8 @@ async fn handle_restore(
 }
 
 /// Delete one or more entries by ID.
-async fn handle_delete(state: &AppState, ids: Vec<nixclip_core::EntryId>) -> ServerMessage {
-    let result = {
-        let store = match state.store.lock() {
-            Ok(s) => s,
-            Err(e) => {
-                return ServerMessage::error(format!("store lock poisoned: {e}"));
-            }
-        };
-        store.delete(&ids)
-    };
+async fn handle_delete(state: Arc<AppState>, ids: Vec<nixclip_core::EntryId>) -> ServerMessage {
+    let result = with_store(state, move |store| store.delete(&ids)).await;
 
     match result {
         Ok(()) => ServerMessage::ok(),
@@ -365,16 +403,12 @@ async fn handle_delete(state: &AppState, ids: Vec<nixclip_core::EntryId>) -> Ser
 }
 
 /// Pin or unpin an entry.
-async fn handle_pin(state: &AppState, id: nixclip_core::EntryId, pinned: bool) -> ServerMessage {
-    let result = {
-        let store = match state.store.lock() {
-            Ok(s) => s,
-            Err(e) => {
-                return ServerMessage::error(format!("store lock poisoned: {e}"));
-            }
-        };
-        store.pin(id, pinned)
-    };
+async fn handle_pin(
+    state: Arc<AppState>,
+    id: nixclip_core::EntryId,
+    pinned: bool,
+) -> ServerMessage {
+    let result = with_store(state, move |store| store.pin(id, pinned)).await;
 
     match result {
         Ok(()) => ServerMessage::ok(),
@@ -383,16 +417,8 @@ async fn handle_pin(state: &AppState, id: nixclip_core::EntryId, pinned: bool) -
 }
 
 /// Clear all unpinned entries.
-async fn handle_clear_unpinned(state: &AppState) -> ServerMessage {
-    let result = {
-        let store = match state.store.lock() {
-            Ok(s) => s,
-            Err(e) => {
-                return ServerMessage::error(format!("store lock poisoned: {e}"));
-            }
-        };
-        store.clear_unpinned()
-    };
+async fn handle_clear_unpinned(state: Arc<AppState>) -> ServerMessage {
+    let result = with_store(state, move |store| store.clear_unpinned()).await;
 
     match result {
         Ok(()) => ServerMessage::ok(),
@@ -401,13 +427,13 @@ async fn handle_clear_unpinned(state: &AppState) -> ServerMessage {
 }
 
 /// Return the current configuration to the client.
-async fn handle_get_config(state: &AppState) -> ServerMessage {
+async fn handle_get_config(state: Arc<AppState>) -> ServerMessage {
     let config = state.config.read().await.clone();
     ServerMessage::config_value(config)
 }
 
 /// Apply a partial TOML patch to the configuration and reload related state.
-async fn handle_set_config(state: &AppState, patch: toml::Value) -> ServerMessage {
+async fn handle_set_config(state: Arc<AppState>, patch: toml::Value) -> ServerMessage {
     // Merge the patch into the current config.
     let new_config = {
         let current = state.config.read().await;
@@ -426,19 +452,19 @@ async fn handle_set_config(state: &AppState, patch: toml::Value) -> ServerMessag
         }
     };
 
-    // Save to disk.
-    if let Err(e) = new_config.save(Config::config_path()) {
+    // Reload privacy filter.
+    let new_filter = match nixclip_core::pipeline::PrivacyFilter::new(&new_config.ignore) {
+        Ok(f) => f,
+        Err(e) => {
+            return ServerMessage::error(format!("invalid privacy filter config: {e}"));
+        }
+    };
+
+    if let Err(e) = save_config(new_config.clone(), state.config_path.clone()).await {
         return ServerMessage::error(format!("failed to save config: {e}"));
     }
 
-    // Reload privacy filter.
     {
-        let new_filter = match nixclip_core::pipeline::PrivacyFilter::new(&new_config.ignore) {
-            Ok(f) => f,
-            Err(e) => {
-                return ServerMessage::error(format!("invalid privacy filter config: {e}"));
-            }
-        };
         let mut filter = state.privacy_filter.write().await;
         *filter = new_filter;
     }

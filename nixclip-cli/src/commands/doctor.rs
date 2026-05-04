@@ -298,17 +298,21 @@ fn check_global_shortcuts_portal() -> Check {
 }
 
 fn check_config_file() -> Check {
-    let config_path = Config::config_path();
-    if !config_path.exists() {
+    let searched_paths = Config::config_search_paths();
+    let Some(config_path) = Config::existing_config_path() else {
         return Check {
             label: "Config file".into(),
             status: CheckStatus::Ok,
             detail: Some(format!(
-                "not found at {} (defaults will be used)",
-                config_path.display()
+                "not found in {} (defaults will be used)",
+                searched_paths
+                    .iter()
+                    .map(|path| path.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             )),
         };
-    }
+    };
 
     match Config::load(&config_path) {
         Ok(_) => Check {
@@ -319,7 +323,7 @@ fn check_config_file() -> Check {
         Err(e) => Check {
             label: "Config file".into(),
             status: CheckStatus::Error,
-            detail: Some(format!("invalid TOML at {}: {e}", config_path.display())),
+            detail: Some(format!("invalid config at {}: {e}", config_path.display())),
         },
     }
 }

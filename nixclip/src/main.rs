@@ -78,13 +78,10 @@ fn main() {
     application.connect_command_line({
         let state = state.clone();
         move |app, command_line| {
-            let plain = command_line
-                .options_dict()
-                .contains("plain")
-                || {
-                    let args = command_line.arguments();
-                    plain_mode_from_args(&args)
-                };
+            let plain = command_line.options_dict().contains("plain") || {
+                let args = command_line.arguments();
+                plain_mode_from_args(&args)
+            };
             let activation_token = command_line
                 .options_dict()
                 .lookup::<String>("activation-token")

@@ -39,6 +39,11 @@ const FAST_RETRY_LIMIT: u32 = 10;
 /// portal. If the portal is unavailable, this keeps retrying in the
 /// background instead of terminating the daemon.
 pub async fn run(state: Arc<AppState>) -> Result<()> {
+    if portal_hotkeys_disabled() {
+        info!("portal hotkey listener disabled by NIXCLIP_DISABLE_PORTAL_HOTKEYS");
+        std::future::pending::<()>().await;
+    }
+
     let mut consecutive_failures = 0_u32;
 
     loop {
@@ -84,6 +89,17 @@ pub async fn run(state: Arc<AppState>) -> Result<()> {
     }
 }
 
+fn portal_hotkeys_disabled() -> bool {
+    matches!(
+        std::env::var("NIXCLIP_DISABLE_PORTAL_HOTKEYS"),
+        Ok(value)
+            if matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+    )
+}
+
 async fn register_and_listen(
     #[allow(unused_variables)] trigger_formatted: &str,
     #[allow(unused_variables)] trigger_plain: &str,
@@ -112,9 +128,8 @@ async fn register_and_listen(
             let shortcut_formatted =
                 NewShortcut::new(SHORTCUT_FORMATTED_ID, SHORTCUT_FORMATTED_DESCRIPTION)
                     .preferred_trigger(Some(trigger_formatted));
-            let shortcut_plain =
-                NewShortcut::new(SHORTCUT_PLAIN_ID, SHORTCUT_PLAIN_DESCRIPTION)
-                    .preferred_trigger(Some(trigger_plain));
+            let shortcut_plain = NewShortcut::new(SHORTCUT_PLAIN_ID, SHORTCUT_PLAIN_DESCRIPTION)
+                .preferred_trigger(Some(trigger_plain));
             let bound = portal
                 .bind_shortcuts(
                     &session,

@@ -5,12 +5,18 @@ use std::path::{Path, PathBuf};
 
 use crate::Result;
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BlobCleanupStats {
+    pub files_deleted: u32,
+    pub bytes_freed: u64,
+}
+
 /// Content-addressed blob storage on disk.
 ///
 /// Blobs are stored in a two-level directory hierarchy derived from the hex
 /// encoding of their 32-byte hash: `{hex[0..4]}/{full_hex}`.  Writes are
-/// atomic: data is first written to a temporary file under `.tmp/`, fsynced,
-/// then renamed to its final location.
+/// first written to a temporary file under `.tmp/`, fsynced, then renamed to
+/// its final location.
 pub struct BlobStore {
     pub(crate) base_dir: PathBuf,
 }
@@ -82,11 +88,18 @@ impl BlobStore {
     ///
     /// Returns the total number of bytes freed.
     pub fn cleanup_orphans(&self, valid_paths: &HashSet<String>) -> Result<u64> {
-        let mut freed: u64 = 0;
+        Ok(self.cleanup_orphans_stats(valid_paths)?.bytes_freed)
+    }
+
+    /// Delete every blob file whose relative path is **not** in `valid_paths`.
+    ///
+    /// Returns both the number of files removed and the total bytes freed.
+    pub fn cleanup_orphans_stats(&self, valid_paths: &HashSet<String>) -> Result<BlobCleanupStats> {
+        let mut stats = BlobCleanupStats::default();
 
         let entries = match fs::read_dir(&self.base_dir) {
             Ok(e) => e,
-            Err(_) => return Ok(0),
+            Err(_) => return Ok(stats),
         };
 
         for dir_entry in entries {
@@ -112,12 +125,13 @@ impl BlobStore {
                 if !valid_paths.contains(&rel) {
                     let size = file_entry.metadata().map(|m| m.len()).unwrap_or(0);
                     fs::remove_file(file_entry.path())?;
-                    freed += size;
+                    stats.files_deleted += 1;
+                    stats.bytes_freed += size;
                 }
             }
         }
 
-        Ok(freed)
+        Ok(stats)
     }
 
     /// Walk the entire blob directory and sum file sizes.

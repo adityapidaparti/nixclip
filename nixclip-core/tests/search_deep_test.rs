@@ -738,3 +738,26 @@ fn search_limit_zero_returns_zero_entries_but_correct_total() {
     );
     assert!(result.entries.is_empty(), "limit=0 must return no entries");
 }
+
+#[test]
+fn text_query_paginates_beyond_five_hundred_matches() {
+    let (store, engine, _dir) = setup();
+
+    for i in 0..620u16 {
+        let mut hash = [0u8; 32];
+        hash[0] = (i & 0xFF) as u8;
+        hash[1] = (i >> 8) as u8;
+        insert_text_with_hash(&store, hash, &format!("shared search term #{i}"));
+    }
+
+    let result = engine
+        .search("shared", None, 590, 20)
+        .expect("search beyond 500 matches");
+
+    assert_eq!(result.total, 620, "total should not truncate at 500");
+    assert_eq!(
+        result.entries.len(),
+        20,
+        "later pages should remain reachable"
+    );
+}

@@ -164,7 +164,9 @@ async fn run() -> Result<()> {
         let s = state.clone();
         async move {
             match watcher::run(s).await {
-                Ok(()) => tracing::warn!("clipboard watcher exited (no backend available or wl-paste stopped)"),
+                Ok(()) => tracing::warn!(
+                    "clipboard watcher exited (no backend available or wl-paste stopped)"
+                ),
                 Err(e) => tracing::warn!(error = %e, "clipboard watcher exited with error"),
             }
         }
