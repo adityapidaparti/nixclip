@@ -81,6 +81,14 @@ journalctl --user -u nixclipd -f
 nixclip doctor
 ```
 
+If the daemon is running but `nixclip doctor` reports missing Wayland/session
+environment, import the graphical session variables and restart the daemon:
+
+```bash
+systemctl --user import-environment WAYLAND_DISPLAY DISPLAY XDG_SESSION_TYPE
+systemctl --user restart nixclipd
+```
+
 ### NixOS With Flakes
 
 Flakes are optional. If your NixOS config already uses flakes, add NixClip as an
@@ -421,6 +429,10 @@ journalctl --user -u nixclipd -f
 nixclip doctor
 
 # Restart daemon
+systemctl --user restart nixclipd
+
+# If the daemon cannot see the Wayland session
+systemctl --user import-environment WAYLAND_DISPLAY DISPLAY XDG_SESSION_TYPE
 systemctl --user restart nixclipd
 ```
 
